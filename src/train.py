@@ -8,8 +8,8 @@ import torch
 from tensordict import TensorDict  # type: ignore[import-untyped]
 from tqdm import tqdm
 
-from src.kw_agent import KWMultiAgentDQN  # type: ignore[import-untyped]
-from src.kw_environment import KWEnvironment, KWParams  # type: ignore[import-untyped]
+from kw_agent import KWMultiAgentDQN  # type: ignore[import-untyped]
+from kw_environment import KWEnvironment, KWParams  # type: ignore[import-untyped]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,8 +65,8 @@ def analyze_equilibrium(
                 break
 
             if actions[i] and actions[i + 1]:
-                type1 = td.get("agent_type")[i]
-                type2 = td.get("agent_type")[i + 1]
+                type1 = td.get(("observation", "agent_type"))[i]
+                type2 = td.get(("observation", "agent_type"))[i + 1]
                 trade_matrices[type1, type2] += 1
                 trade_matrices[type2, type1] += 1
 
@@ -90,10 +90,14 @@ def train(
 ) -> list:
     """Train the agent"""
     episode_rewards = []
-    td = TensorDict(env.reset(), batch_size=env.batch_size)
+
+    # Initial reset
+    td = env.reset()
+
     for episode in tqdm(range(n_episodes), desc="Training"):
         episode_reward = torch.zeros(env.params.n_types, device=agent.device)
-        td = TensorDict(env.reset(), batch_size=env.batch_size)
+        td = env.reset()
+
         # Run episode
         for _ in range(episode_length):
             # Select actions
@@ -101,18 +105,16 @@ def train(
             td.set("action", actions)
 
             # Step environment
-            next_td = env.step(tensordict=td)
+            td = env.step(td)  # This updates td in-place with next state info
 
-            # Store experience
+            # Store experience in buffer
             agent.add_to_buffer(td)
 
-            # Update rewards
-            rewards = next_td.get("reward")
+            # Update rewards - note the ["next", "reward"] access pattern
+            rewards = td.get(("next", "reward"))
             for agent_type in range(env.params.n_types):
-                type_mask = td.get("agent_type") == agent_type
+                type_mask = td.get(("observation", "agent_type")) == agent_type
                 episode_reward[agent_type] += rewards[type_mask].mean()
-
-            td = next_td
 
         # Update networks
         losses = agent.update()

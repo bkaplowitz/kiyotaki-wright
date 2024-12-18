@@ -12,6 +12,8 @@ from torchrl.data import (  # type: ignore[import-untyped]
 )
 from torchrl.envs import EnvBase  # type: ignore[import-untyped]
 
+#! VMAS AND BENCHMARL.
+
 
 @dataclass
 class KWParams:
@@ -115,7 +117,7 @@ class KWEnvironment(EnvBase):
             th.arange(self.params.n_types, device=self._device), self.params.n_agents
         )
 
-        # Convert storage costs to tensor
+        # Convert storage costs to tensor if not already done
         if not hasattr(self, "storage_costs_tensor"):
             self.storage_costs_tensor = th.tensor(
                 self.params.storage_costs, device=self._device
@@ -124,16 +126,20 @@ class KWEnvironment(EnvBase):
                 self.params.consumption_values, device=self._device
             )
 
-        # Create observation tensordict
-        td = TensorDict(  # type: ignore[union-attr]
+        # Create observation tensordict with proper structure
+        obs = TensorDict(
             {
                 "agent_type": self.agent_types,
                 "inventory": self.inventories,
             },
             batch_size=th.Size([self.params.n_types * self.params.n_agents]),
+            device=self._device,
         )
-
-        return td
+        return TensorDict(
+            {"observation": obs},
+            batch_size=th.Size([self.params.n_types * self.params.n_agents]),
+            device=self._device,
+        )
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step in the environment"""
@@ -180,30 +186,34 @@ class KWEnvironment(EnvBase):
         # Update inventories
         self.inventories = matched_inventories[th.argsort(perm)]
 
-        # Return tensordict with all required fields
-        return TensorDict(
+        # Create return tensordict following TorchRL's standard format
+        out_td = TensorDict(
             {
-                # Current state
-                "agent_type": self.agent_types,
-                "inventory": self.inventories,
-                "reward": rewards,
-                "terminated": th.zeros(
-                    (self.params.n_types * self.params.n_agents,),
-                    dtype=th.bool,
+                "observation": TensorDict(
+                    {
+                        "agent_type": self.agent_types,
+                        "inventory": self.inventories,
+                    },
+                    batch_size=th.Size([self.params.n_types * self.params.n_agents]),
                     device=self._device,
                 ),
+                "reward": rewards,
                 "done": th.zeros(
                     (self.params.n_types * self.params.n_agents,),
                     dtype=th.bool,
                     device=self._device,
                 ),
-                # Next state using nested keys
-                ("next", "agent_type"): self.agent_types,
-                ("next", "inventory"): self.inventories,
+                "terminated": th.zeros(
+                    (self.params.n_types * self.params.n_agents,),
+                    dtype=th.bool,
+                    device=self._device,
+                ),
             },
             batch_size=th.Size([self.params.n_types * self.params.n_agents]),
             device=self._device,
         )
+
+        return out_td
 
     def _set_batch_size(self, batch_size: int) -> None:
         self._batch_size = th.Size([batch_size])
