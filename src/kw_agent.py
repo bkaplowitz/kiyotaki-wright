@@ -1,13 +1,16 @@
-import numpy as np
+import tensordict
 import torch
 import torch.nn as nn
-from tensordict import TensorDict
-from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer, TensorSpec
+from torchrl.data import (
+    LazyTensorStorage,
+    OneHotDiscreteTensorSpec,
+    TensorDictReplayBuffer,
+)
 from torchrl.modules import MLP, EGreedyModule
 from torchrl.objectives import DQNLoss
 
 
-# TODO: Add Dreamer
+# TODO: Dreamer later
 class KWDQNNet(nn.Module):
     """DQN network for Kiyotaki-Wright agents"""
 
@@ -26,13 +29,17 @@ class KWDQNNet(nn.Module):
             activation_class=nn.ReLU,
         )
 
-    def forward(self, tensordict: TensorDict) -> TensorDict:
-        """Forward pass of the network"""
+    def forward(self, tensordict: tensordict.TensorDict):
+        # Combine agent_type and inventory into a single state tensor
         state = torch.stack(
-            [tensordict["agent_type"].float(), tensordict["inventory"].float()],
+            [tensordict.get("agent_type").float(), tensordict.get("inventory").float()],
             dim=-1,
         )
+
+        # Get Q-values
         q_values = self.net(state)
+
+        # Store Q-values in tensordict
         tensordict.set("q_values", q_values)
         return tensordict
 
@@ -66,16 +73,6 @@ class KWMultiAgentDQN:
             KWDQNNet().to(device) for _ in range(num_agent_types)
         ])
 
-        self.target_nets = nn.ModuleList([
-            KWDQNNet().to(device) for _ in range(num_agent_types)
-        ])
-
-        # Initialize target networks
-        for policy_net, target_net in zip(
-            self.policy_nets, self.target_nets, strict=False
-        ):
-            target_net.load_state_dict(policy_net.state_dict())
-
         # Create optimizers
         self.optimizers = [
             torch.optim.Adam(net.parameters(), lr=learning_rate)
@@ -91,53 +88,47 @@ class KWMultiAgentDQN:
             for _ in range(num_agent_types)
         ]
 
-        # Create epsilon-greedy modules with proper parameters
-        action_spec = TensorSpec(
-            shape=(),  # scalar actions
-            dtype=torch.int64,
-            device=device,
-        )
-
-        # Calculate annealing steps from decay rate
-        annealing_steps = int(-1 / np.log(epsilon_decay))  # Convert decay rate to steps
-
+        # Create epsilon-greedy module with proper spec
+        action_spec = OneHotDiscreteTensorSpec(2)  # 2 actions: accept or reject
         self.epsilon_greedy = EGreedyModule(
             spec=action_spec,
+            annealing_num_steps=1000,  # Adjust this based on your needs
             eps_init=epsilon_start,
             eps_end=epsilon_end,
-            annealing_num_steps=annealing_steps,
         )
 
-        # Create DQN losses with correct parameter names
+        # Create DQN losses
         self.dqn_losses = [
             DQNLoss(
                 value_network=policy_net,
-                target_network=target_net,
                 gamma=gamma,
+                double_dqn=True,  # Enable double DQN
             )
-            for policy_net, target_net in zip(
-                self.policy_nets, self.target_nets, strict=False
-            )
+            for policy_net in self.policy_nets
         ]
 
         self.steps = 0
 
-    def select_actions(self, tensordict: TensorDict) -> torch.Tensor:
+    def select_actions(self, tensordict: tensordict.TensorDict) -> torch.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
         with torch.no_grad():
             actions = torch.zeros(
-                tensordict.batch_size[0], dtype=torch.int64, device=self.device
+                tensordict.batch_size, dtype=torch.int64, device=self.device
             )
 
             for agent_type in range(self.num_agent_types):
-                type_mask = tensordict["agent_type"] == agent_type
+                # Get indices for this agent type
+                type_mask = tensordict.get("agent_type") == agent_type
                 if not type_mask.any():
                     continue
 
+                # Get Q-values for this agent type
                 type_td = tensordict[type_mask]
                 type_td = self.policy_nets[agent_type](type_td)
+
+                # Select actions using epsilon-greedy
                 type_td = self.epsilon_greedy(type_td)
-                actions[type_mask] = type_td["action"]
+                actions[type_mask] = type_td.get("action")
 
             return actions
 
@@ -145,46 +136,53 @@ class KWMultiAgentDQN:
         """Update all agent networks using their respective replay buffers"""
         losses = []
 
+        # Update each agent type's network
         for agent_type in range(self.num_agent_types):
             if len(self.replay_buffers[agent_type]) < self.batch_size:
                 continue
 
+            # Sample from replay buffer
             samples = self.replay_buffers[agent_type].sample()
+
+            # Compute loss
             loss = self.dqn_losses[agent_type](samples)
             losses.append(loss.item())
 
+            # Optimize
             self.optimizers[agent_type].zero_grad()
             loss.backward()
             self.optimizers[agent_type].step()
 
+        # Update target networks
+        self.steps += 1
+        if self.steps % self.target_update_freq == 0:
+            for policy_net in self.policy_nets:
+                policy_net.load_state_dict(policy_net.state_dict())
+
         return losses if losses else None
 
-    def add_to_buffer(self, tensordict: TensorDict) -> None:
+    def add_to_buffer(self, tensordict: tensordict.TensorDict):
         """Add experiences to appropriate replay buffers"""
         for agent_type in range(self.num_agent_types):
-            type_mask = tensordict["agent_type"] == agent_type
+            type_mask = tensordict.get("agent_type") == agent_type
             if not type_mask.any():
                 continue
+
             self.replay_buffers[agent_type].add(tensordict[type_mask])
 
     def state_dict(self):
         return {
             "policy_nets": [net.state_dict() for net in self.policy_nets],
-            "target_nets": [net.state_dict() for net in self.target_nets],
             "optimizers": [opt.state_dict() for opt in self.optimizers],
             "steps": self.steps,
         }
 
     def load_state_dict(self, state_dict):
-        for _i, (net, state) in enumerate(
+        for _, (net, state) in enumerate(
             zip(self.policy_nets, state_dict["policy_nets"], strict=False)
         ):
             net.load_state_dict(state)
-        for _i, (net, state) in enumerate(
-            zip(self.target_nets, state_dict["target_nets"], strict=False)
-        ):
-            net.load_state_dict(state)
-        for _i, (opt, state) in enumerate(
+        for _, (opt, state) in enumerate(
             zip(self.optimizers, state_dict["optimizers"], strict=False)
         ):
             opt.load_state_dict(state)
