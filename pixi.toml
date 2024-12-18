@@ -12,6 +12,11 @@ platforms = [
 	"osx-arm64",
 ]
 
+[tasks]
+start = "python src/benchmarl_ppo.py"
+test = "python -m pytest tests/"
+lint = "pre-commit run --all-files"
+
 [dependencies]
 python = ">=3.12, <3.13"
 ruff = ">=0.8.3,<0.9"
@@ -35,3 +40,7 @@ torch = ">=2.5.1, <3"
 tensordict = ">=0.6.2, <0.7"
 benchmarl = ">=1.3.0, <2"
 vmas = ">=1.4.3, <2"
+id-marl-eval = "*"
+hydra-core = "*"
+hydra-submitit-launcher = "*"
+wandb = ">=0.16.0, <1"

@@ -1,0 +1,4 @@
+# MAPPO algorithm configuration
+_target_: benchmarl.algorithms.MappoConfig
+share_param_critic: true
+normalize_advantage: false

@@ -1,0 +1,5 @@
+# VMAS Navigation task configuration
+_target_: benchmarl.tasks.VmasTask.NAVIGATION
+n_agents: 3
+max_steps: 100
+continuous_actions: true

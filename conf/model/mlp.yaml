@@ -1,0 +1,5 @@
+# MLP model configuration
+_target_: benchmarl.models.MlpConfig
+num_cells: [256, 256]
+activation_class: "torch.nn.Tanh"
+layer_class: "torch.nn.Linear"
