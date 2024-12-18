@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import torch
-from benchmarl import Experiment, ExperimentConfig
-from benchmarl.algorithms import MappoConfig
-from benchmarl.models import MlpConfig
-from benchmarl.tasks import VmasTask
+from benchmarl import Experiment, ExperimentConfig  # type: ignore
+from benchmarl.algorithms import MappoConfig  # type: ignore
+from benchmarl.models import MlpConfig  # type: ignore
+from benchmarl.tasks import VmasTask  # type: ignore
 from matplotlib import pyplot as plt
 
 

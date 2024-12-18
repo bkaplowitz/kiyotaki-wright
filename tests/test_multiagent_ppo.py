@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-import pytest_check as check
+import pytest_check as check  # type: ignore
 import torch
 
 from src.multiagent_ppo import (
