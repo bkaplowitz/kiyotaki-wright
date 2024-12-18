@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import torch as th
 from tensordict import TensorDict  # type: ignore[import-untyped]
 from torch import Tensor, nn
 from torchrl.data import (  # type: ignore[import-untyped]
     LazyTensorStorage,
-    OneHotDiscreteTensorSpec,
+    OneHot,
     TensorDictReplayBuffer,
 )
 from torchrl.modules import MLP, EGreedyModule  # type: ignore[import-untyped]
@@ -35,16 +35,26 @@ class KWDQNNet(nn.Module):
     def forward(self, tensordict: TensorDict) -> TensorDict:
         # Combine agent_type and inventory into a single state tensor
         state = th.stack(
-            [tensordict.get("agent_type").float(), tensordict.get("inventory").float()],
+            [
+                tensordict.get("agent_type").float(),
+                tensordict.get("inventory").float(),
+            ],
             dim=-1,
-        )
+        )  # Shape: [batch_size, 2]
 
         # Get Q-values
-        q_values = self.net(state)
+        q_values = self.net(state)  # Shape: [batch_size, num_actions]
 
         # Store Q-values in tensordict
-        tensordict.set("q_values", q_values)
-        return tensordict
+
+        return TensorDict(
+            {
+                "q_values": q_values,
+                "agent_type": tensordict.get("agent_type"),
+                "inventory": tensordict.get("inventory"),
+            },
+            batch_size=tensordict.batch_size,
+        )
 
 
 class KWAgentStateDict(TypedDict):
@@ -75,17 +85,29 @@ class KWMultiAgentDQN:
         self.device = device
         self.num_agent_types = num_agent_types
         self.batch_size = batch_size
+        self.batch_dim = 0
+        self.action_dim = -1
         self.target_update_freq = target_update_freq
 
         # Create networks for each agent type
-        self.policy_nets = nn.ModuleList([
+        self.value_nets = nn.ModuleList([
             KWDQNNet().to(device) for _ in range(num_agent_types)
         ])
 
+        # Create target networks
+        self.target_nets = nn.ModuleList([
+            KWDQNNet().to(device) for _ in range(num_agent_types)
+        ])
+
+        # Initialize target networks with value network weights
+        for target_net, value_net in zip(
+            self.target_nets, self.value_nets, strict=False
+        ):
+            target_net.load_state_dict(value_net.state_dict())
+
         # Create optimizers
         self.optimizers = [
-            th.optim.Adam(net.parameters(), lr=learning_rate)
-            for net in self.policy_nets
+            th.optim.Adam(net.parameters(), lr=learning_rate) for net in self.value_nets
         ]
 
         # Create replay buffers for each agent type
@@ -98,10 +120,10 @@ class KWMultiAgentDQN:
         ]
 
         # Create epsilon-greedy module with proper spec
-        action_spec = OneHotDiscreteTensorSpec(2)  # 2 actions: accept or reject
+        action_spec = OneHot(2)
         self.epsilon_greedy = EGreedyModule(
             spec=action_spec,
-            annealing_num_steps=1000,  # Adjust this based on your needs
+            annealing_num_steps=1000,
             eps_init=epsilon_start,
             eps_end=epsilon_end,
         )
@@ -109,11 +131,14 @@ class KWMultiAgentDQN:
         # Create DQN losses
         self.dqn_losses = [
             DQNLoss(
-                value_network=policy_net,
-                gamma=gamma,
+                value_network=value_net,
+                loss_function="l2",
+                delay_value=True,
                 double_dqn=True,  # Enable double DQN
+                action_space="one-hot",  # Since we have binary actions
+                reduction="mean",
             )
-            for policy_net in self.policy_nets
+            for value_net in self.value_nets
         ]
 
         self.steps = 0
@@ -121,8 +146,13 @@ class KWMultiAgentDQN:
     def select_actions(self, tensordict: TensorDict) -> th.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
         with th.no_grad():
+            # Ensure tensordict has proper batch dimensions
+            if tensordict.batch_dims == 0:
+                tensordict = tensordict.unsqueeze(0)
+
+            # Initialize actions with the correct shape to match tensordict
             actions = th.zeros(
-                tensordict.batch_size, dtype=th.int64, device=self.device
+                tensordict.get("agent_type").shape, dtype=th.int64, device=self.device
             )
 
             for agent_type in range(self.num_agent_types):
@@ -131,15 +161,43 @@ class KWMultiAgentDQN:
                 if not type_mask.any():
                     continue
 
-                # Get Q-values for this agent type
-                type_td = tensordict[type_mask]
-                type_td = self.policy_nets[agent_type](type_td)
+                # Create type-specific tensordict
+                type_td = TensorDict(
+                    {
+                        "agent_type": tensordict.get("agent_type")[type_mask].squeeze(
+                            0
+                        ),
+                        "inventory": tensordict.get("inventory")[type_mask].squeeze(0),
+                    },
+                    batch_size=th.Size([cast(int, type_mask.sum().item())]),
+                    device=self.device,  # Add device
+                )
 
-                # Select actions using epsilon-greedy
+                # Get Q-values
+                type_td = self.value_nets[agent_type](type_td)
+
+                # Convert Q-values to action probabilities
+                q_values = type_td.get("q_values")
+                greedy_actions = q_values.argmax(dim=-1)
+
+                # Convert to one-hot format for epsilon-greedy
+                one_hot_actions = th.zeros(
+                    (*greedy_actions.shape, 2), dtype=th.int64, device=self.device
+                )
+                one_hot_actions.scatter_(-1, greedy_actions.unsqueeze(-1), 1)
+
+                # Add action to tensordict for epsilon-greedy
+                type_td.set("action", one_hot_actions)
+
+                # Apply epsilon-greedy exploration
                 type_td = self.epsilon_greedy(type_td)
-                actions[type_mask] = type_td.get("action")
 
-            return actions
+                # Convert back from one-hot to indices and assign to the correct positions
+                actions[type_mask] = (
+                    type_td.get("action").argmax(dim=-1).to(self.device)
+                )
+
+            return actions.squeeze()  # Remove batch dimension if present
 
     def update(self) -> list[float] | None:
         """Update all agent networks using their respective replay buffers"""
@@ -162,12 +220,10 @@ class KWMultiAgentDQN:
             loss.backward()
             self.optimizers[agent_type].step()
 
-        # Update target networks
-        self.steps += 1
-        if self.steps % self.target_update_freq == 0:
-            for policy_net in self.policy_nets:
-                policy_net.load_state_dict(policy_net.state_dict())
+            # Update target network
+            self.dqn_losses[agent_type].update_target_params()
 
+        self.steps += 1
         return losses if losses else None
 
     def add_to_buffer(self, tensordict: TensorDict) -> None:
@@ -181,14 +237,14 @@ class KWMultiAgentDQN:
 
     def state_dict(self) -> KWAgentStateDict:
         return {
-            "policy_nets": [net.state_dict() for net in self.policy_nets],
+            "policy_nets": [net.state_dict() for net in self.value_nets],
             "optimizers": [opt.state_dict() for opt in self.optimizers],
             "steps": self.steps,
         }
 
     def load_state_dict(self, state_dict: KWAgentStateDict) -> None:
         for _i, (net, state) in enumerate(
-            zip(self.policy_nets, state_dict["policy_nets"], strict=False)
+            zip(self.value_nets, state_dict["policy_nets"], strict=False)
         ):
             net.load_state_dict(state)
         for _, (opt, state) in enumerate(

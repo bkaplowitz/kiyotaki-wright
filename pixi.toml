@@ -3,7 +3,7 @@ name = "kiyotaki_wright"
 version = "0.1.0"
 description = "Kiyotaki-Wright model with RL"
 authors = [
-	"Your Name <your.email@example.com>",
+	"Brandon Kaplowitz <bkaplowitzbk@gmail.com>",
 ]
 channels = [
 	"conda-forge",
@@ -31,3 +31,4 @@ torchrl = ">=0.6.0, <0.7"
 plotly = ">=5.24.1, <6"
 tqdm = ">=4.67.1, <5"
 torch = ">=2.5.1, <3"
+tensordict = ">=0.6.2, <0.7"

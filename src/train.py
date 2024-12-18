@@ -3,13 +3,13 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import plotly.graph_objects as go
+import plotly.graph_objects as go  # type: ignore[import-untyped]
 import torch
 from tensordict import TensorDict  # type: ignore[import-untyped]
 from tqdm import tqdm
 
-from kw_agent import KWMultiAgentDQN
-from kw_environment import KWEnvironment, KWParams
+from src.kw_agent import KWMultiAgentDQN  # type: ignore[import-untyped]
+from src.kw_environment import KWEnvironment, KWParams  # type: ignore[import-untyped]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,7 +52,10 @@ def analyze_equilibrium(
     )
 
     for _ in range(n_episodes):
-        td = TensorDict(env.reset(), batch_size=[])
+        td = TensorDict(
+            env.reset(),
+            batch_size=torch.Size([env.params.n_types * env.params.n_agents]),
+        )
         actions = agent.select_actions(td)
         td["action"] = actions
 
@@ -89,7 +92,7 @@ def train(
     episode_rewards = []
 
     for episode in tqdm(range(n_episodes), desc="Training"):
-        td = TensorDict(env.reset(), batch_size=[])
+        td = TensorDict(env.reset(), batch_size=env.batch_size)
         episode_reward = torch.zeros(env.params.n_types, device=agent.device)
 
         # Run episode
@@ -99,7 +102,7 @@ def train(
             td["action"] = actions
 
             # Step environment
-            next_td = env.step(td)
+            next_td = env.step(tensordict=td)
 
             # Store experience
             agent.add_to_buffer(td)

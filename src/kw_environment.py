@@ -5,10 +5,10 @@ import numpy.typing as npt
 import torch as th
 from tensordict import TensorDict, TensorDictBase  # type: ignore[import-untyped]
 from torch import Tensor
-from torchrl.data import (
-    CompositeSpec,
-    DiscreteTensorSpec,
-    UnboundedContinuousTensorSpec,
+from torchrl.data import (  # type: ignore[import-untyped]
+    Categorical,
+    Composite,
+    UnboundedContinuous,
 )
 from torchrl.envs import EnvBase  # type: ignore[import-untyped]
 
@@ -55,38 +55,44 @@ class KWEnvironment(EnvBase):
 
     params: KWParams
     _device: th.device | None
-    _batch_size: int | None
+    _batch_size: th.Size
     inventories: Tensor
     agent_types: Tensor
     storage_costs_tensor: Tensor
     consumption_values_tensor: Tensor
 
     def __init__(self, params: KWParams):
-        super().__init__()
+        total_agents = params.n_types * params.n_agents
         self.params = params
         self._device = None
-        self._batch_size = None
+        self._batch_size = th.Size([total_agents])
+        super().__init__()
 
-        # Define the observation and action spaces
-        self.observation_spec = CompositeSpec(
-            agent_type=DiscreteTensorSpec(n=params.n_types),
-            inventory=DiscreteTensorSpec(n=params.n_types),
-            shape=(params.n_types * params.n_agents,),
-        )
+        total_agents = params.n_types * params.n_agents
 
-        self.action_spec = DiscreteTensorSpec(
+        # Define the observation and action spaces using updated specs
+        self.observation_spec = Composite({
+            "agent_type": Categorical(
+                n=params.n_types,
+            ),
+            "inventory": Categorical(
+                n=params.n_types,
+            ),
+        }).expand(total_agents)  # Expand to handle all agents
+
+        self.action_spec = Categorical(
             n=2,  # accept or reject trade
-            shape=(params.n_types * params.n_agents,),
-        )
+        ).expand(total_agents)
 
-        self.reward_spec = UnboundedContinuousTensorSpec(
-            shape=(params.n_types * params.n_agents,),
-        )
+        self.reward_spec = UnboundedContinuous(
+            shape=(),
+        ).expand(total_agents)
 
-        self.done_spec = CompositeSpec(
-            done=DiscreteTensorSpec(n=2),
-            shape=(1,),
-        )
+        self.done_spec = Composite({
+            "done": Categorical(
+                n=2,
+            ),
+        }).expand(total_agents)
 
         # Initialize state
         self.reset()
@@ -124,19 +130,19 @@ class KWEnvironment(EnvBase):
                 "agent_type": self.agent_types,
                 "inventory": self.inventories,
             },
-            batch_size=[self.params.n_types * self.params.n_agents],
+            batch_size=th.Size([self.params.n_types * self.params.n_agents]),
         )
 
         return td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step in the environment"""
-        actions = tensordict["action"]
+        actions = tensordict.get("action")
         rewards = th.zeros_like(self.inventories, dtype=th.float32)
 
         # Randomly match agents
         perm = th.randperm(len(self.inventories), device=self._device)
-        matched_inventories = self.inventories[perm]
+        matched_inventories = self.inventories
         matched_types = self.agent_types[perm]
         matched_actions = actions[perm]
 
@@ -174,28 +180,36 @@ class KWEnvironment(EnvBase):
         # Update inventories
         self.inventories = matched_inventories[th.argsort(perm)]
 
-        # Create return tensordict
-        td = tensordict.TensorDict(
+        # Return tensordict with all required fields
+        return TensorDict(
             {
+                # Current state
                 "agent_type": self.agent_types,
                 "inventory": self.inventories,
                 "reward": rewards,
-                "done": th.zeros(1, dtype=th.bool, device=self._device),
-                "next": {
-                    "agent_type": self.agent_types,
-                    "inventory": self.inventories,
-                },
+                "terminated": th.zeros(
+                    (self.params.n_types * self.params.n_agents,),
+                    dtype=th.bool,
+                    device=self._device,
+                ),
+                "done": th.zeros(
+                    (self.params.n_types * self.params.n_agents,),
+                    dtype=th.bool,
+                    device=self._device,
+                ),
+                # Next state using nested keys
+                ("next", "agent_type"): self.agent_types,
+                ("next", "inventory"): self.inventories,
             },
-            batch_size=[self.params.n_types * self.params.n_agents],
+            batch_size=th.Size([self.params.n_types * self.params.n_agents]),
+            device=self._device,
         )
 
-        return td
-
     def _set_batch_size(self, batch_size: int) -> None:
-        self._batch_size = batch_size
+        self._batch_size = th.Size([batch_size])
 
     @property
-    def batch_size(self) -> int | None:
+    def batch_size(self) -> th.Size | None:
         """Return the current batch size of the environment."""
         return self._batch_size
 
