@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDict  # type: ignore[import-untyped]
 from tqdm import tqdm
 
 from kw_agent import KWMultiAgentDQN
@@ -15,7 +15,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def plot_training_results(rewards: np.ndarray, save_path: str | None = None):
+def plot_training_results(
+    rewards: np.ndarray, save_path: str | None = None
+) -> go.Figure:
     """Plot training results"""
     episodes = list(range(len(rewards)))
 
@@ -127,7 +129,8 @@ def train(
     return episode_rewards
 
 
-def main():
+def main() -> None:
+    """Main training function"""
     # Create output directory
     output_dir = Path("results")
     output_dir.mkdir(exist_ok=True)

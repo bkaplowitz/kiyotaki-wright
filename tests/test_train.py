@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import torch
 from pytest_check import check
-
-from src.train import (
+import torch as th
+from train import (
     KWEnvironment,
     KWMultiAgentDQN,
     KWParams,
@@ -17,12 +17,18 @@ from src.train import (
 
 # Fixtures
 @pytest.fixture
-def device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def device() -> th.device:
+    return th.device(
+        "cuda"
+        if th.cuda.is_available()
+        else "mps"
+        if th.backends.mps.is_available()
+        else "cpu"
+    )
 
 
 @pytest.fixture
-def env(device):
+def env(device: th.device) -> KWEnvironment:
     params = KWParams()
     env = KWEnvironment(params)
     env.to(device)
@@ -30,12 +36,12 @@ def env(device):
 
 
 @pytest.fixture
-def agent(device, env):
+def agent(device: th.device, env: KWEnvironment) -> KWMultiAgentDQN:
     return KWMultiAgentDQN(
         num_agent_types=env.params.n_types,
         device=device,
         learning_rate=1e-4,
-        gamma=env.params.discount_factor,
+        gamma=env.params.gamma,
         epsilon_start=1.0,
         epsilon_end=0.01,
         epsilon_decay=0.995,
@@ -44,7 +50,7 @@ def agent(device, env):
 
 # Lightweight tests marked with 'quick'
 @pytest.mark.quick
-def test_environment_initialization(env):
+def test_environment_initialization(env: KWEnvironment) -> None:
     """Test basic environment initialization"""
     td = env.reset()
     check.is_instance(td, dict)
@@ -53,7 +59,7 @@ def test_environment_initialization(env):
 
 
 @pytest.mark.quick
-def test_agent_initialization(agent, env):
+def test_agent_initialization(agent: KWMultiAgentDQN, env: KWEnvironment) -> None:
     """Test basic agent initialization"""
     check.equal(agent.num_agent_types, env.params.n_types)
     check.is_instance(agent.epsilon, float)
@@ -61,7 +67,7 @@ def test_agent_initialization(agent, env):
 
 
 @pytest.mark.quick
-def test_plot_training_results():
+def test_plot_training_results() -> None:
     """Test plot generation"""
     rewards = np.random.randn(10, 3)  # 10 episodes, 3 agent types
     fig = plot_training_results(rewards)
@@ -76,7 +82,7 @@ def test_plot_training_results():
 
 # Comprehensive tests
 @pytest.mark.timeout(300)  # 5 minute timeout
-def test_training_loop(env, agent):
+def test_training_loop(env: KWEnvironment, agent: KWMultiAgentDQN) -> None:
     """Test full training loop"""
     n_episodes = 5
     episode_length = 10
@@ -91,7 +97,7 @@ def test_training_loop(env, agent):
     check.is_true(np.all(np.isfinite(rewards_array)))
 
 
-def test_analyze_equilibrium(env, agent):
+def test_analyze_equilibrium(env: KWEnvironment, agent: KWMultiAgentDQN) -> None:
     """Test equilibrium analysis"""
     results = analyze_equilibrium(env, agent, n_episodes=5)
 
@@ -111,22 +117,24 @@ def test_analyze_equilibrium(env, agent):
 
 
 @pytest.mark.parametrize("epsilon", [0.0, 0.5, 1.0])
-def test_agent_action_selection(agent, env, epsilon):
+def test_agent_action_selection(
+    agent: KWMultiAgentDQN, env: KWEnvironment, epsilon: float
+) -> None:
     """Test agent action selection at different exploration rates"""
     agent.epsilon = epsilon
     td = env.reset()
     actions = agent.select_actions(td)
 
-    check.is_instance(actions, torch.Tensor)
+    check.is_instance(actions, th.Tensor)
     check.equal(len(actions), len(td["agent_type"]))
-    check.is_true(torch.all((actions == 0) | (actions == 1)))
+    check.is_true(th.all((actions == 0) | (actions == 1)))
 
 
 # Integration tests
 @pytest.mark.slow
-def test_end_to_end():
+def test_end_to_end() -> None:
     """Test complete training pipeline"""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = th.device("cuda" if th.cuda.is_available() else "cpu")
     params = KWParams()
     env = KWEnvironment(params)
     env.to(device)
@@ -150,7 +158,7 @@ def test_end_to_end():
 
     # Save and load model
     temp_path = Path("test_agent.pt")
-    torch.save(agent.state_dict(), temp_path)
+    th.save(agent.state_dict(), temp_path)
 
     # Load model
     new_agent = KWMultiAgentDQN(
@@ -159,6 +167,6 @@ def test_end_to_end():
         learning_rate=1e-4,
         gamma=params.discount_factor,
     )
-    new_agent.load_state_dict(torch.load(temp_path))
+    new_agent.load_state_dict(th.load(temp_path))
 
     temp_path.unlink()  # Cleanup

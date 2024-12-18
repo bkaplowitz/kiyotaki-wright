@@ -1,3 +1,37 @@
 {
-    "python.analysis.typeCheckingMode": "basic"
+	"python.analysis.typeCheckingMode": "basic",
+	"python.languageServer": "Pylance",
+	"mypy-type-checker.importStrategy": "fromEnvironment",
+	"files.autoSave": "onFocusChange",
+	"pixi-vscode.defaultPlatforms": [
+		"osx-arm64"
+	],
+	"python.analysis.persistAllIndices": true,
+	"python.analysis.packageIndexDepths": [
+
+		{
+			"name": "sklearn",
+			"depth": 2
+		},
+		{
+			"name": "matplotlib",
+			"depth": 2
+		},
+		{
+			"name": "scipy",
+			"depth": 2
+		},
+		{
+			"name": "django",
+			"depth": 2
+		},
+		{
+			"name": "flask",
+			"depth": 2
+		},
+		{
+			"name": "fastapi",
+			"depth": 2
+		}
+	]
 }

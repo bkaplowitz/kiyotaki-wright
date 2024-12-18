@@ -3,15 +3,17 @@ from __future__ import annotations
 from typing import TypedDict
 
 import torch
-import torch.nn as nn
-from tensordict import TensorDict
-from torchrl.data import (
+from tensordict import TensorDict  # type: ignore[import-untyped]
+from torch import nn
+from torchrl.data import (  # type: ignore[import-untyped]
     LazyTensorStorage,
     OneHotDiscreteTensorSpec,
     TensorDictReplayBuffer,
 )
 from torchrl.modules import MLP, EGreedyModule  # type: ignore[import-untyped]
 from torchrl.objectives import DQNLoss  # type: ignore[import-untyped]
+
+from torch import Tensor
 
 
 class KWDQNNet(nn.Module):
@@ -48,8 +50,8 @@ class KWDQNNet(nn.Module):
 
 
 class KWAgentStateDict(TypedDict):
-    policy_nets: list[dict[str, torch.Tensor]]
-    optimizers: list[dict[str, torch.Tensor]]
+    policy_nets: list[dict[str, Tensor]]
+    optimizers: list[dict[str, Tensor]]
     steps: int
 
 

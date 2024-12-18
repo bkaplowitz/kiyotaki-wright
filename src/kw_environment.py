@@ -1,14 +1,15 @@
 from dataclasses import dataclass, field
 
 import numpy as np
-import torch
-from tensordict import TensorDictBase
+import numpy.typing as npt
+import torch as th
+from tensordict import TensorDict, TensorDictBase  # type: ignore[import-untyped]
 from torchrl.data import (
     CompositeSpec,
     DiscreteTensorSpec,
     UnboundedContinuousTensorSpec,
 )
-from torchrl.envs import EnvBase
+from torchrl.envs import EnvBase  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -20,7 +21,7 @@ class KWParams:
 
     # Each type i produces good i and consumes good i+1 (mod 3)
     # Storage costs: Type 1 has lowest cost storing good 1, etc.
-    storage_costs: np.ndarray = field(
+    storage_costs: npt.NDArray[np.float64] = field(
         default_factory=lambda: np.array([
             [0.0, 2.0, 3.0],  # Type 0's storage costs
             [3.0, 0.0, 2.0],  # Type 1's storage costs
@@ -29,12 +30,12 @@ class KWParams:
     )
 
     # Consumption values when agent gets their consumption good
-    consumption_values: np.ndarray = field(
+    consumption_values: npt.NDArray[np.float64] = field(
         default_factory=lambda: np.array([3.0, 3.0, 3.0])
     )
 
     # Production costs when agent produces their good
-    production_costs: np.ndarray = field(
+    production_costs: npt.NDArray[np.float64] = field(
         default_factory=lambda: np.array([0.5, 0.5, 0.5])
     )
 
@@ -52,12 +53,12 @@ class KWEnvironment(EnvBase):
     """
 
     params: KWParams
-    _device: torch.device | None
+    _device: th.device | None
     _batch_size: int | None
-    inventories: torch.Tensor
-    agent_types: torch.Tensor
-    storage_costs_tensor: torch.Tensor
-    consumption_values_tensor: torch.Tensor
+    inventories: th.Tensor
+    agent_types: th.Tensor
+    storage_costs_tensor: th.Tensor
+    consumption_values_tensor: th.Tensor
 
     def __init__(self, params: KWParams):
         super().__init__()
@@ -92,9 +93,9 @@ class KWEnvironment(EnvBase):
     def _reset(self, tensordict: TensorDictBase | None = None) -> TensorDictBase:
         """Reset the environment to initial state"""
         # Initialize agents with their production good
-        self.inventories = torch.zeros(
+        self.inventories = th.zeros(
             (self.params.n_types * self.params.n_agents,),
-            dtype=torch.int64,
+            dtype=th.int64,
             device=self._device,
         )
 
@@ -103,21 +104,21 @@ class KWEnvironment(EnvBase):
             end_idx = (i + 1) * self.params.n_agents
             self.inventories[start_idx:end_idx] = i
 
-        self.agent_types = torch.repeat_interleave(
-            torch.arange(self.params.n_types, device=self._device), self.params.n_agents
+        self.agent_types = th.repeat_interleave(
+            th.arange(self.params.n_types, device=self._device), self.params.n_agents
         )
 
         # Convert storage costs to tensor
         if not hasattr(self, "storage_costs_tensor"):
-            self.storage_costs_tensor = torch.tensor(
+            self.storage_costs_tensor = th.tensor(
                 self.params.storage_costs, device=self._device
             )
-            self.consumption_values_tensor = torch.tensor(
+            self.consumption_values_tensor = th.tensor(
                 self.params.consumption_values, device=self._device
             )
 
         # Create observation tensordict
-        td = tensordict.TensorDict(
+        td = TensorDict(  # type: ignore[union-attr]
             {
                 "agent_type": self.agent_types,
                 "inventory": self.inventories,
@@ -130,10 +131,10 @@ class KWEnvironment(EnvBase):
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one step in the environment"""
         actions = tensordict["action"]
-        rewards = torch.zeros_like(self.inventories, dtype=torch.float32)
+        rewards = th.zeros_like(self.inventories, dtype=th.float32)
 
         # Randomly match agents
-        perm = torch.randperm(len(self.inventories), device=self._device)
+        perm = th.randperm(len(self.inventories), device=self._device)
         matched_inventories = self.inventories[perm]
         matched_types = self.agent_types[perm]
         matched_actions = actions[perm]
@@ -170,7 +171,7 @@ class KWEnvironment(EnvBase):
             rewards[perm[i + 1]] -= self.storage_costs_tensor[type2, inv2]
 
         # Update inventories
-        self.inventories = matched_inventories[torch.argsort(perm)]
+        self.inventories = matched_inventories[th.argsort(perm)]
 
         # Create return tensordict
         td = tensordict.TensorDict(
@@ -178,7 +179,7 @@ class KWEnvironment(EnvBase):
                 "agent_type": self.agent_types,
                 "inventory": self.inventories,
                 "reward": rewards,
-                "done": torch.zeros(1, dtype=torch.bool, device=self._device),
+                "done": th.zeros(1, dtype=th.bool, device=self._device),
                 "next": {
                     "agent_type": self.agent_types,
                     "inventory": self.inventories,
@@ -197,7 +198,7 @@ class KWEnvironment(EnvBase):
         """Return the current batch size of the environment."""
         return self._batch_size
 
-    def to(self, device: torch.device) -> "KWEnvironment":
+    def to(self, device: th.device) -> "KWEnvironment":
         """Move the environment to the specified device.
 
         Args:
@@ -215,16 +216,16 @@ class KWEnvironment(EnvBase):
             self.agent_types = self.agent_types.to(device)
         return self
 
-    def get_inventory_distribution(self) -> torch.Tensor:
+    def get_inventory_distribution(self) -> th.Tensor:
         """Get the distribution of goods across all agents"""
-        return torch.bincount(
+        return th.bincount(
             self.inventories, minlength=self.params.n_types
         ).float() / len(self.inventories)
 
     def _set_seed(self, seed: int | None = None) -> None:
         """Sets the seed for the environment's random number generator."""
         if seed is not None:
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
+            th.manual_seed(seed)
+            if th.cuda.is_available():
+                th.cuda.manual_seed_all(seed)
             np.random.seed(seed)
