@@ -1,7 +1,8 @@
-import tensordict
+import numpy as np
 import torch
 import torch.nn as nn
-from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
+from tensordict import TensorDict
+from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer, TensorSpec
 from torchrl.modules import MLP, EGreedyModule
 from torchrl.objectives import DQNLoss
 
@@ -21,21 +22,17 @@ class KWDQNNet(nn.Module):
         self.net = MLP(
             in_features=state_dim,
             out_features=num_actions,
-            hidden_sizes=[hidden_dim, hidden_dim],
-            activation=nn.ReLU,
+            num_cells=[hidden_dim, hidden_dim],
+            activation_class=nn.ReLU,
         )
 
-    def forward(self, tensordict: tensordict.TensorDict):
-        # Combine agent_type and inventory into a single state tensor
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        """Forward pass of the network"""
         state = torch.stack(
-            [tensordict.get("agent_type").float(), tensordict.get("inventory").float()],
+            [tensordict["agent_type"].float(), tensordict["inventory"].float()],
             dim=-1,
         )
-
-        # Get Q-values
         q_values = self.net(state)
-
-        # Store Q-values in tensordict
         tensordict.set("q_values", q_values)
         return tensordict
 
@@ -94,18 +91,28 @@ class KWMultiAgentDQN:
             for _ in range(num_agent_types)
         ]
 
-        # Create epsilon-greedy modules
-        self.epsilon_greedy = EGreedyModule(
-            epsilon_start,
-            epsilon_end,
-            epsilon_decay,
+        # Create epsilon-greedy modules with proper parameters
+        action_spec = TensorSpec(
+            shape=(),  # scalar actions
+            dtype=torch.int64,
+            device=device,
         )
 
-        # Create DQN losses
+        # Calculate annealing steps from decay rate
+        annealing_steps = int(-1 / np.log(epsilon_decay))  # Convert decay rate to steps
+
+        self.epsilon_greedy = EGreedyModule(
+            spec=action_spec,
+            eps_init=epsilon_start,
+            eps_end=epsilon_end,
+            annealing_num_steps=annealing_steps,
+        )
+
+        # Create DQN losses with correct parameter names
         self.dqn_losses = [
             DQNLoss(
-                policy_net,
-                target_net,
+                value_network=policy_net,
+                target_network=target_net,
                 gamma=gamma,
             )
             for policy_net, target_net in zip(
@@ -115,26 +122,22 @@ class KWMultiAgentDQN:
 
         self.steps = 0
 
-    def select_actions(self, tensordict: tensordict.TensorDict) -> torch.Tensor:
+    def select_actions(self, tensordict: TensorDict) -> torch.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
         with torch.no_grad():
             actions = torch.zeros(
-                tensordict.batch_size, dtype=torch.int64, device=self.device
+                tensordict.batch_size[0], dtype=torch.int64, device=self.device
             )
 
             for agent_type in range(self.num_agent_types):
-                # Get indices for this agent type
-                type_mask = tensordict.get("agent_type") == agent_type
+                type_mask = tensordict["agent_type"] == agent_type
                 if not type_mask.any():
                     continue
 
-                # Get Q-values for this agent type
                 type_td = tensordict[type_mask]
                 type_td = self.policy_nets[agent_type](type_td)
-
-                # Select actions using epsilon-greedy
                 type_td = self.epsilon_greedy(type_td)
-                actions[type_mask] = type_td.get("action")
+                actions[type_mask] = type_td["action"]
 
             return actions
 
@@ -142,40 +145,26 @@ class KWMultiAgentDQN:
         """Update all agent networks using their respective replay buffers"""
         losses = []
 
-        # Update each agent type's network
         for agent_type in range(self.num_agent_types):
             if len(self.replay_buffers[agent_type]) < self.batch_size:
                 continue
 
-            # Sample from replay buffer
             samples = self.replay_buffers[agent_type].sample()
-
-            # Compute loss
             loss = self.dqn_losses[agent_type](samples)
             losses.append(loss.item())
 
-            # Optimize
             self.optimizers[agent_type].zero_grad()
             loss.backward()
             self.optimizers[agent_type].step()
 
-        # Update target networks
-        self.steps += 1
-        if self.steps % self.target_update_freq == 0:
-            for policy_net, target_net in zip(
-                self.policy_nets, self.target_nets, strict=False
-            ):
-                target_net.load_state_dict(policy_net.state_dict())
-
         return losses if losses else None
 
-    def add_to_buffer(self, tensordict: tensordict.TensorDict):
+    def add_to_buffer(self, tensordict: TensorDict) -> None:
         """Add experiences to appropriate replay buffers"""
         for agent_type in range(self.num_agent_types):
-            type_mask = tensordict.get("agent_type") == agent_type
+            type_mask = tensordict["agent_type"] == agent_type
             if not type_mask.any():
                 continue
-
             self.replay_buffers[agent_type].add(tensordict[type_mask])
 
     def state_dict(self):

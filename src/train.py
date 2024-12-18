@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 import torch
+from tensordict import TensorDict
 from tqdm import tqdm
 
 from kw_agent import KWMultiAgentDQN
@@ -14,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def plot_training_results(rewards: np.ndarray, save_path: str = None):
+def plot_training_results(rewards: np.ndarray, save_path: str | None = None):
     """Plot training results"""
     episodes = list(range(len(rewards)))
 
@@ -49,7 +50,7 @@ def analyze_equilibrium(
     )
 
     for _ in range(n_episodes):
-        td = env.reset()
+        td = TensorDict(env.reset(), batch_size=[])
         actions = agent.select_actions(td)
         td["action"] = actions
 
@@ -86,7 +87,7 @@ def train(
     episode_rewards = []
 
     for episode in tqdm(range(n_episodes), desc="Training"):
-        td = env.reset()
+        td = TensorDict(env.reset(), batch_size=[])
         episode_reward = torch.zeros(env.params.n_types, device=agent.device)
 
         # Run episode
