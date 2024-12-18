@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import torch
+import torch as th
 from tensordict import TensorDict  # type: ignore[import-untyped]
-from torch import nn
+from torch import Tensor, nn
 from torchrl.data import (  # type: ignore[import-untyped]
     LazyTensorStorage,
     OneHotDiscreteTensorSpec,
@@ -12,8 +12,6 @@ from torchrl.data import (  # type: ignore[import-untyped]
 )
 from torchrl.modules import MLP, EGreedyModule  # type: ignore[import-untyped]
 from torchrl.objectives import DQNLoss  # type: ignore[import-untyped]
-
-from torch import Tensor
 
 
 class KWDQNNet(nn.Module):
@@ -36,7 +34,7 @@ class KWDQNNet(nn.Module):
 
     def forward(self, tensordict: TensorDict) -> TensorDict:
         # Combine agent_type and inventory into a single state tensor
-        state = torch.stack(
+        state = th.stack(
             [tensordict.get("agent_type").float(), tensordict.get("inventory").float()],
             dim=-1,
         )
@@ -64,7 +62,7 @@ class KWMultiAgentDQN:
     def __init__(
         self,
         num_agent_types: int,
-        device: torch.device,
+        device: th.device,
         learning_rate: float = 1e-4,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
@@ -86,7 +84,7 @@ class KWMultiAgentDQN:
 
         # Create optimizers
         self.optimizers = [
-            torch.optim.Adam(net.parameters(), lr=learning_rate)
+            th.optim.Adam(net.parameters(), lr=learning_rate)
             for net in self.policy_nets
         ]
 
@@ -120,11 +118,11 @@ class KWMultiAgentDQN:
 
         self.steps = 0
 
-    def select_actions(self, tensordict: TensorDict) -> torch.Tensor:
+    def select_actions(self, tensordict: TensorDict) -> th.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
-        with torch.no_grad():
-            actions = torch.zeros(
-                tensordict.batch_size, dtype=torch.int64, device=self.device
+        with th.no_grad():
+            actions = th.zeros(
+                tensordict.batch_size, dtype=th.int64, device=self.device
             )
 
             for agent_type in range(self.num_agent_types):

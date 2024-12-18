@@ -4,6 +4,7 @@ import numpy as np
 import numpy.typing as npt
 import torch as th
 from tensordict import TensorDict, TensorDictBase  # type: ignore[import-untyped]
+from torch import Tensor
 from torchrl.data import (
     CompositeSpec,
     DiscreteTensorSpec,
@@ -55,10 +56,10 @@ class KWEnvironment(EnvBase):
     params: KWParams
     _device: th.device | None
     _batch_size: int | None
-    inventories: th.Tensor
-    agent_types: th.Tensor
-    storage_costs_tensor: th.Tensor
-    consumption_values_tensor: th.Tensor
+    inventories: Tensor
+    agent_types: Tensor
+    storage_costs_tensor: Tensor
+    consumption_values_tensor: Tensor
 
     def __init__(self, params: KWParams):
         super().__init__()
@@ -216,7 +217,7 @@ class KWEnvironment(EnvBase):
             self.agent_types = self.agent_types.to(device)
         return self
 
-    def get_inventory_distribution(self) -> th.Tensor:
+    def get_inventory_distribution(self) -> Tensor:
         """Get the distribution of goods across all agents"""
         return th.bincount(
             self.inventories, minlength=self.params.n_types
