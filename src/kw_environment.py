@@ -51,6 +51,14 @@ class KWEnvironment(EnvBase):
     following the original paper specifications, using TorchRL's EnvBase
     """
 
+    params: KWParams
+    _device: torch.device | None
+    _batch_size: int | None
+    inventories: torch.Tensor
+    agent_types: torch.Tensor
+    storage_costs_tensor: torch.Tensor
+    consumption_values_tensor: torch.Tensor
+
     def __init__(self, params: KWParams):
         super().__init__()
         self.params = params
@@ -181,14 +189,23 @@ class KWEnvironment(EnvBase):
 
         return td
 
-    def _set_batch_size(self, batch_size) -> None:
+    def _set_batch_size(self, batch_size: int) -> None:
         self._batch_size = batch_size
 
     @property
-    def batch_size(self):
+    def batch_size(self) -> int | None:
+        """Return the current batch size of the environment."""
         return self._batch_size
 
-    def to(self, device):
+    def to(self, device: torch.device) -> "KWEnvironment":
+        """Move the environment to the specified device.
+
+        Args:
+            device: The torch device to move the environment to
+
+        Returns:
+            The environment instance
+        """
         self._device = device
         if hasattr(self, "storage_costs_tensor"):
             self.storage_costs_tensor = self.storage_costs_tensor.to(device)

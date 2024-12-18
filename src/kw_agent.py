@@ -1,16 +1,17 @@
-import tensordict
+from typing import TypedDict
+
 import torch
 import torch.nn as nn
-from torchrl.data import (
+from tensordict import TensorDict  # type: ignore[import-untyped]
+from torchrl.data import (  # type: ignore[import-untyped]
     LazyTensorStorage,
     OneHotDiscreteTensorSpec,
     TensorDictReplayBuffer,
 )
-from torchrl.modules import MLP, EGreedyModule
-from torchrl.objectives import DQNLoss
+from torchrl.modules import MLP, EGreedyModule  # type: ignore[import-untyped]
+from torchrl.objectives import DQNLoss  # type: ignore[import-untyped]
 
 
-# TODO: Dreamer later
 class KWDQNNet(nn.Module):
     """DQN network for Kiyotaki-Wright agents"""
 
@@ -29,7 +30,7 @@ class KWDQNNet(nn.Module):
             activation_class=nn.ReLU,
         )
 
-    def forward(self, tensordict: tensordict.TensorDict):
+    def forward(self, tensordict: TensorDict) -> TensorDict:
         # Combine agent_type and inventory into a single state tensor
         state = torch.stack(
             [tensordict.get("agent_type").float(), tensordict.get("inventory").float()],
@@ -42,6 +43,12 @@ class KWDQNNet(nn.Module):
         # Store Q-values in tensordict
         tensordict.set("q_values", q_values)
         return tensordict
+
+
+class KWAgentStateDict(TypedDict):
+    policy_nets: list[dict[str, torch.Tensor]]
+    optimizers: list[dict[str, torch.Tensor]]
+    steps: int
 
 
 class KWMultiAgentDQN:
@@ -109,7 +116,7 @@ class KWMultiAgentDQN:
 
         self.steps = 0
 
-    def select_actions(self, tensordict: tensordict.TensorDict) -> torch.Tensor:
+    def select_actions(self, tensordict: TensorDict) -> torch.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
         with torch.no_grad():
             actions = torch.zeros(
@@ -161,7 +168,7 @@ class KWMultiAgentDQN:
 
         return losses if losses else None
 
-    def add_to_buffer(self, tensordict: tensordict.TensorDict):
+    def add_to_buffer(self, tensordict: TensorDict) -> None:
         """Add experiences to appropriate replay buffers"""
         for agent_type in range(self.num_agent_types):
             type_mask = tensordict.get("agent_type") == agent_type
@@ -170,15 +177,15 @@ class KWMultiAgentDQN:
 
             self.replay_buffers[agent_type].add(tensordict[type_mask])
 
-    def state_dict(self):
+    def state_dict(self) -> KWAgentStateDict:
         return {
             "policy_nets": [net.state_dict() for net in self.policy_nets],
             "optimizers": [opt.state_dict() for opt in self.optimizers],
             "steps": self.steps,
         }
 
-    def load_state_dict(self, state_dict):
-        for _, (net, state) in enumerate(
+    def load_state_dict(self, state_dict: KWAgentStateDict) -> None:
+        for _i, (net, state) in enumerate(
             zip(self.policy_nets, state_dict["policy_nets"], strict=False)
         ):
             net.load_state_dict(state)
@@ -187,3 +194,6 @@ class KWMultiAgentDQN:
         ):
             opt.load_state_dict(state)
         self.steps = state_dict["steps"]
+
+    def _set_batch_size(self, batch_size: int | None) -> None:
+        self._batch_size = batch_size
