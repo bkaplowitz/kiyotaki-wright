@@ -1,14 +1,13 @@
+import tensordict
 import torch
 import torch.nn as nn
-from torchrl.modules import MLP, DQNNet, EGreedyModule
+from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
+from torchrl.modules import MLP, EGreedyModule
 from torchrl.objectives import DQNLoss
-from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage
-from typing import List, Optional
-import tensordict
 
 
-# Dreamer
-class KWDQNNet(DQNNet):
+# TODO: Add Dreamer
+class KWDQNNet(nn.Module):
     """DQN network for Kiyotaki-Wright agents"""
 
     def __init__(
@@ -75,7 +74,9 @@ class KWMultiAgentDQN:
         ])
 
         # Initialize target networks
-        for policy_net, target_net in zip(self.policy_nets, self.target_nets):
+        for policy_net, target_net in zip(
+            self.policy_nets, self.target_nets, strict=False
+        ):
             target_net.load_state_dict(policy_net.state_dict())
 
         # Create optimizers
@@ -107,7 +108,9 @@ class KWMultiAgentDQN:
                 target_net,
                 gamma=gamma,
             )
-            for policy_net, target_net in zip(self.policy_nets, self.target_nets)
+            for policy_net, target_net in zip(
+                self.policy_nets, self.target_nets, strict=False
+            )
         ]
 
         self.steps = 0
@@ -135,7 +138,7 @@ class KWMultiAgentDQN:
 
             return actions
 
-    def update(self) -> Optional[List[float]]:
+    def update(self) -> list[float] | None:
         """Update all agent networks using their respective replay buffers"""
         losses = []
 
@@ -159,7 +162,9 @@ class KWMultiAgentDQN:
         # Update target networks
         self.steps += 1
         if self.steps % self.target_update_freq == 0:
-            for policy_net, target_net in zip(self.policy_nets, self.target_nets):
+            for policy_net, target_net in zip(
+                self.policy_nets, self.target_nets, strict=False
+            ):
                 target_net.load_state_dict(policy_net.state_dict())
 
         return losses if losses else None
@@ -182,16 +187,16 @@ class KWMultiAgentDQN:
         }
 
     def load_state_dict(self, state_dict):
-        for i, (net, state) in enumerate(
-            zip(self.policy_nets, state_dict["policy_nets"])
+        for _i, (net, state) in enumerate(
+            zip(self.policy_nets, state_dict["policy_nets"], strict=False)
         ):
             net.load_state_dict(state)
-        for i, (net, state) in enumerate(
-            zip(self.target_nets, state_dict["target_nets"])
+        for _i, (net, state) in enumerate(
+            zip(self.target_nets, state_dict["target_nets"], strict=False)
         ):
             net.load_state_dict(state)
-        for i, (opt, state) in enumerate(
-            zip(self.optimizers, state_dict["optimizers"])
+        for _i, (opt, state) in enumerate(
+            zip(self.optimizers, state_dict["optimizers"], strict=False)
         ):
             opt.load_state_dict(state)
         self.steps = state_dict["steps"]

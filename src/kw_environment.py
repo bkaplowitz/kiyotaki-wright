@@ -1,15 +1,14 @@
+from dataclasses import dataclass, field
+
 import numpy as np
 import torch
-from dataclasses import dataclass, field
-from typing import Tuple, List, Dict, Optional
-from torchrl.envs import EnvBase
+from tensordict import TensorDictBase
 from torchrl.data import (
-    TensorDictBase,
     CompositeSpec,
-    UnboundedContinuousTensorSpec,
     DiscreteTensorSpec,
+    UnboundedContinuousTensorSpec,
 )
-import tensordict
+from torchrl.envs import EnvBase
 
 
 @dataclass
@@ -82,7 +81,7 @@ class KWEnvironment(EnvBase):
         # Initialize state
         self.reset()
 
-    def _reset(self, tensordict: Optional[TensorDictBase] = None) -> TensorDictBase:
+    def _reset(self, tensordict: TensorDictBase | None = None) -> TensorDictBase:
         """Reset the environment to initial state"""
         # Initialize agents with their production good
         self.inventories = torch.zeros(
@@ -204,3 +203,11 @@ class KWEnvironment(EnvBase):
         return torch.bincount(
             self.inventories, minlength=self.params.n_types
         ).float() / len(self.inventories)
+
+    def _set_seed(self, seed: int | None = None) -> None:
+        """Sets the seed for the environment's random number generator."""
+        if seed is not None:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+            np.random.seed(seed)

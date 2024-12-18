@@ -1,0 +1,8 @@
+[project]
+name = "kiyotaki-wright"
+version = "0.1.0"
+description = "Kiyotaki-Wright model implementation"
+requires-python = ">=3.12"
+authors = [
+	{ name = "Brandon Kaplowitz", email = "bkaplowitzbk@gmail.com" },
+]

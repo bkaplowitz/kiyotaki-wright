@@ -1,13 +1,14 @@
+import random
+from collections import deque
+from typing import Any
+
+import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import numpy as np
-from typing import List, Dict, Any
-from collections import deque
-import random
 
-from kw_environment import KWEnvironment, KWParams
-from kw_agent import DQN
+from src.kw_agent import DQN
+from src.kw_environment import KWEnvironment
 
 
 class KWLightningModule(pl.LightningModule):
@@ -39,7 +40,9 @@ class KWLightningModule(pl.LightningModule):
         ])
 
         # Initialize target networks
-        for policy_net, target_net in zip(self.policy_nets, self.target_nets):
+        for policy_net, target_net in zip(
+            self.policy_nets, self.target_nets, strict=False
+        ):
             target_net.load_state_dict(policy_net.state_dict())
 
         # Create replay buffers for each agent type
@@ -95,7 +98,11 @@ class KWLightningModule(pl.LightningModule):
                 agent_rewards = rewards[agent_indices]
 
                 for s, a, r, ns in zip(
-                    agent_states, agent_actions, agent_rewards, agent_next_states
+                    agent_states,
+                    agent_actions,
+                    agent_rewards,
+                    agent_next_states,
+                    strict=False,
                 ):
                     self.replay_buffers[i].append((s, a, r, ns, done))
 
@@ -115,7 +122,9 @@ class KWLightningModule(pl.LightningModule):
         # Update target networks
         self.steps += 1
         if self.steps % self.hparams.target_update == 0:
-            for policy_net, target_net in zip(self.policy_nets, self.target_nets):
+            for policy_net, target_net in zip(
+                self.policy_nets, self.target_nets, strict=False
+            ):
                 target_net.load_state_dict(policy_net.state_dict())
 
         # Update epsilon
@@ -140,13 +149,13 @@ class KWLightningModule(pl.LightningModule):
     def _train_on_buffers(self) -> float:
         total_loss = 0
 
-        for i, (policy_net, target_net, replay_buffer) in enumerate(
-            zip(self.policy_nets, self.target_nets, self.replay_buffers)
+        for _i, (policy_net, target_net, replay_buffer) in enumerate(
+            zip(self.policy_nets, self.target_nets, self.replay_buffers, strict=False)
         ):
             # Sample from replay buffer
             batch = random.sample(replay_buffer, self.hparams.batch_size)
             state_batch, action_batch, reward_batch, next_state_batch, done_batch = zip(
-                *batch
+                *batch, strict=False
             )
 
             state_batch = torch.FloatTensor(np.array(state_batch))
@@ -182,7 +191,7 @@ class KWLightningModule(pl.LightningModule):
         ]
         return optimizers
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get training metrics for analysis"""
         return {
             "rewards": np.array(self.episode_rewards),

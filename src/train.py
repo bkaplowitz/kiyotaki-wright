@@ -1,13 +1,14 @@
-import torch
-import numpy as np
-from pathlib import Path
-import plotly.graph_objects as go
 import json
-from tqdm import tqdm
 import logging
+from pathlib import Path
 
-from kw_environment import KWEnvironment, KWParams
+import numpy as np
+import plotly.graph_objects as go
+import torch
+from tqdm import tqdm
+
 from kw_agent import KWMultiAgentDQN
+from kw_environment import KWEnvironment, KWParams
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ def analyze_equilibrium(
                 trade_matrices[type1, type2] += 1
                 trade_matrices[type2, type1] += 1
 
-        next_td = env.step(td)
+        env.step(td)
         inventory_distributions.append(env.get_inventory_distribution())
 
     return {
