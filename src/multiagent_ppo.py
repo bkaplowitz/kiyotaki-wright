@@ -138,7 +138,7 @@ def train_vmas() -> tuple[TransformedEnv, ProbabilisticActor]:
         n_agent_inputs=env.observation_spec["agents", "observation"].shape[-1],
         n_agent_outputs=1,
         n_agents=env.n_agents,
-        centralised=mappo,
+        centralized=mappo,
         share_params=share_parameters_critic,
         device=device,
         depth=2,
@@ -267,7 +267,7 @@ def train_vmas() -> tuple[TransformedEnv, ProbabilisticActor]:
 
 
 def render_policy(
-    env: VmasEnv, policy: ProbabilisticActor, num_episodes: int = 3
+    env: TransformedEnv, policy: ProbabilisticActor, num_episodes: int = 3
 ) -> None:
     """Render the trained policy in action"""
     # Create a single environment for rendering
