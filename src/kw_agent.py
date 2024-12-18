@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 from typing import TypedDict
 
 import torch
 import torch.nn as nn
-from tensordict import TensorDict  # type: ignore[import-untyped]
-from torchrl.data import (  # type: ignore[import-untyped]
+from tensordict import TensorDict
+from torchrl.data import (
     LazyTensorStorage,
     OneHotDiscreteTensorSpec,
     TensorDictReplayBuffer,
