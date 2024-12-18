@@ -1,6 +1,6 @@
 from .kw_agent import KWMultiAgentDQN
 from .kw_environment import KWEnvironment, KWParams
-from .train import train, analyze_equilibrium, plot_training_results
+from .train import analyze_equilibrium, plot_training_results, train
 
 __all__ = [
     "KWMultiAgentDQN",

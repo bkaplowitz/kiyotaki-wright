@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TypedDict, cast
 
 import torch as th
-from tensordict import TensorDict  # type: ignore[import-untyped]
+from tensordict import TensorDict, TensorDictBase  # type: ignore[import-untyped]
 from torch import Tensor, nn
 from torchrl.data import (  # type: ignore[import-untyped]
     LazyTensorStorage,
@@ -143,7 +143,7 @@ class KWMultiAgentDQN:
 
         self.steps = 0
 
-    def select_actions(self, tensordict: TensorDict) -> th.Tensor:
+    def select_actions(self, tensordict: TensorDictBase) -> th.Tensor:
         """Select actions for all agents using epsilon-greedy policy"""
         with th.no_grad():
             # Ensure tensordict has proper batch dimensions
@@ -226,7 +226,7 @@ class KWMultiAgentDQN:
         self.steps += 1
         return losses if losses else None
 
-    def add_to_buffer(self, tensordict: TensorDict) -> None:
+    def add_to_buffer(self, tensordict: TensorDictBase) -> None:
         """Add experiences to appropriate replay buffers"""
         for agent_type in range(self.num_agent_types):
             type_mask = tensordict.get("agent_type") == agent_type

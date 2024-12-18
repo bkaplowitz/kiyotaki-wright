@@ -90,16 +90,15 @@ def train(
 ) -> list:
     """Train the agent"""
     episode_rewards = []
-
+    td = TensorDict(env.reset(), batch_size=env.batch_size)
     for episode in tqdm(range(n_episodes), desc="Training"):
-        td = TensorDict(env.reset(), batch_size=env.batch_size)
         episode_reward = torch.zeros(env.params.n_types, device=agent.device)
-
+        td = TensorDict(env.reset(), batch_size=env.batch_size)
         # Run episode
         for _ in range(episode_length):
             # Select actions
             actions = agent.select_actions(td)
-            td["action"] = actions
+            td.set("action", actions)
 
             # Step environment
             next_td = env.step(tensordict=td)

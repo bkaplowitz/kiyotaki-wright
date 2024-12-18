@@ -85,7 +85,7 @@ class KWEnvironment(EnvBase):
         ).expand(total_agents)
 
         self.reward_spec = UnboundedContinuous(
-            shape=(),
+            shape=th.Size([]),
         ).expand(total_agents)
 
         self.done_spec = Composite({
@@ -97,7 +97,7 @@ class KWEnvironment(EnvBase):
         # Initialize state
         self.reset()
 
-    def _reset(self, tensordict: TensorDictBase | None = None) -> TensorDictBase:
+    def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
         """Reset the environment to initial state"""
         # Initialize agents with their production good
         self.inventories = th.zeros(
