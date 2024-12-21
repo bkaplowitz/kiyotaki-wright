@@ -340,7 +340,10 @@ def train_kiyotaki_wright(
 
     # Initialize the world first
     world = scenario.make_world(
-        batch_dim=frames_per_batch // 100, device=device, n_agents=9
+        batch_dim=frames_per_batch // 100,
+        device=device,
+        n_agents=9,
+        types=[0, 1, 2],
     )
     scenario._world = world  # Store reference to world
 

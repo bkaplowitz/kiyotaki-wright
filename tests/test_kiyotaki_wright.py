@@ -1,10 +1,8 @@
-from typing import cast
-
 import pytest
 import pytest_check as check
 import torch
 
-from src.environments.kiyotaki_wright import KiyotakiAgent, KiyotakiWrightScenario
+from src.environments.kiyotaki_wright import KiyotakiWrightScenario
 
 
 def approx_equal(
@@ -24,8 +22,9 @@ def approx_equal(
     return satisfy_abs_tol and satisfy_rel_tol
 
 
+@pytest.mark.fast
 def test_welfare_metrics() -> None:
-    """Test welfare metrics calculation and Pareto optimality"""
+    """Test welfare metrics calculation"""
     device = torch.device("cpu")
     batch_dim = 1
     n_agents = 9
@@ -35,7 +34,6 @@ def test_welfare_metrics() -> None:
 
     # Test initial state metrics
     for i, agent in enumerate(world.agents):
-        agent = cast(KiyotakiAgent, agent)
         metrics = scenario.compute_welfare_metrics(agent, world)
 
         # Check metric keys exist
@@ -67,16 +65,13 @@ def test_welfare_metrics() -> None:
     initial_holdings = [(a.type, a.holding) for a in world.agents]
     print(f"Initial agent holdings: {initial_holdings}")
 
-    for i, agent in enumerate(world.agents):
-        agent = cast(KiyotakiAgent, agent)
+    for agent in world.agents:
         agent.holding = agent.type  # Give each agent their preferred good
 
     final_holdings = [(a.type, a.holding) for a in world.agents]
     print(f"Final agent holdings: {final_holdings}")
 
-    metrics = scenario.compute_welfare_metrics(
-        cast(KiyotakiAgent, world.agents[0]), world
-    )
+    metrics = scenario.compute_welfare_metrics(world.agents[0], world)
 
     welfare_loss = abs(metrics["welfare_loss_pct"])
     check.is_true(
@@ -89,6 +84,7 @@ def test_welfare_metrics() -> None:
     )
 
 
+@pytest.mark.fast
 @pytest.mark.parametrize("n_agents", [3, 6, 9])
 def test_world_creation(n_agents: int) -> None:
     """Test world creation with different numbers of agents"""
@@ -106,7 +102,7 @@ def test_world_creation(n_agents: int) -> None:
     )
 
     # Check agent distribution
-    agent_types = [cast(KiyotakiAgent, agent).type for agent in world.agents]
+    agent_types = [agent.type for agent in world.agents]
     for type_id in range(3):
         type_count = sum(1 for t in agent_types if t == type_id)
         expected_count = n_agents // 3
@@ -118,6 +114,7 @@ def test_world_creation(n_agents: int) -> None:
         )
 
 
+@pytest.mark.fast
 def test_invalid_world_creation() -> None:
     """Test that world creation fails with invalid number of agents"""
     device = torch.device("cpu")
@@ -125,7 +122,9 @@ def test_invalid_world_creation() -> None:
     invalid_n_agents = 4  # Not divisible by 3
 
     scenario = KiyotakiWrightScenario()
-    with pytest.raises(AssertionError, match="Number of agents must be divisible by 3"):
+    with pytest.raises(
+        ValueError, match="Number of agents must be divisible by number of types"
+    ):
         scenario.make_world(
             batch_dim=batch_dim, device=device, n_agents=invalid_n_agents
         )

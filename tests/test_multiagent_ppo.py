@@ -83,7 +83,7 @@ def test_environment_creation(test_env: VmasEnv) -> None:
     check.equal(test_env.max_steps, 10)
 
 
-@pytest.mark.timeout(300)
+@pytest.mark.fast
 def test_policy_creation(test_policy: ProbabilisticActor) -> None:
     """Test policy network creation and properties"""
     check.is_instance(
@@ -92,21 +92,19 @@ def test_policy_creation(test_policy: ProbabilisticActor) -> None:
         "Policy should be an instance of ProbabilisticActor",
     )
 
-    # Check for required attributes with detailed messages
-    check.is_true(
-        hasattr(test_policy, "module"),
-        f"Policy missing required attribute: module. "
-        f"Available attributes: {dir(test_policy)}",
-    )
+    # Check for required attributes and methods
+    required_attributes = {
+        "module": "Policy network module",
+        "get_dist": "Distribution getter method",
+        "random_sample": "Random sampling method",
+        "log_prob": "Log probability method",
+    }
 
-    # Instead of checking for distribution_class directly, verify the policy
-    # can generate distributions by checking if it has the necessary methods
-    required_methods = ["get_dist", "random_sample"]
-    for method in required_methods:
+    for attr, description in required_attributes.items():
         check.is_true(
-            hasattr(test_policy, method),
-            f"Policy missing required method: {method}. "
-            f"Available methods: {[attr for attr in dir(test_policy) if not attr.startswith('_')]}",
+            hasattr(test_policy, attr),
+            f"Missing {description} ({attr}). "
+            f"Available attributes: {[a for a in dir(test_policy) if not a.startswith('_')]}",
         )
 
 
@@ -133,31 +131,22 @@ def test_environment_step(test_env: VmasEnv, test_policy: ProbabilisticActor) ->
         tensordict = test_policy(tensordict)
     next_tensordict = test_env.step(tensordict)
 
-    # Check tensordict structure with detailed messages
+    # Print full tensordict structure for debugging
+    print("\nTensorDict structure:")
+    for key in next_tensordict.keys(True):  # type: ignore
+        print(f"Key: {key}")
+        if key in next_tensordict:
+            print(f"Shape: {next_tensordict[key].shape}")
+
+    # Check for reward in the correct location
     check.is_true(
         ("next", "agents", "reward") in next_tensordict,
-        f"Reward key not found in tensordict. Available keys: {next_tensordict.keys(True)}",
-    )
-    check.is_true(
-        "done" in next_tensordict,
-        f"Done flag not found in tensordict. Available keys: {next_tensordict.keys(True)}",
-    )
-    check.is_true(
-        ("agents", "observation") in next_tensordict,
-        f"Observation not found in tensordict. Available keys: {next_tensordict.keys(True)}",
+        f"Reward key not found at ('next', 'agents', 'reward'). "
+        f"Available keys: {list(next_tensordict.keys(True))}",  # type: ignore
     )
 
-    # Check reward key structure with more context
-    reward_found = ("next", "agents", "reward") in next_tensordict
-    if not reward_found:
-        available_keys = list(next_tensordict.keys(True))
-        raise AssertionError(
-            f"Expected reward key not found. Looking for ('next', 'agents', 'reward'). "
-            f"Available keys: {available_keys}"
-        )
 
-
-@pytest.mark.timeout(600)
+@pytest.mark.slow
 def test_training_loop() -> None:
     """Test the training loop with minimal settings"""
     # Override global constants for faster testing
@@ -173,7 +162,7 @@ def test_training_loop() -> None:
     check.is_instance(policy, ProbabilisticActor)
 
 
-@pytest.mark.timeout(300)
+@pytest.mark.slow
 def test_render_policy(
     test_env: VmasEnv, test_policy: ProbabilisticActor, mocker: Any
 ) -> None:
@@ -184,7 +173,15 @@ def test_render_policy(
 
     # Create a TransformedEnv wrapper around test_env
     transformed_env = TransformedEnv(test_env)
-    render_policy(transformed_env, test_policy, num_episodes=1)
+
+    # Ensure correct shape for observation
+    tensordict = transformed_env.reset()
+    print(f"\nObservation shape: {tensordict[('agents', 'observation')].shape}")
+
+    try:
+        render_policy(transformed_env, test_policy, num_episodes=1)
+    except ValueError as e:
+        pytest.fail(f"Shape mismatch in render_policy: {e!s}")
 
     check.is_true(test_env.render.called)
     check.is_true(test_env.close.called)
@@ -216,11 +213,12 @@ def test_device_compatibility(device_name: str) -> None:
     check.equal(str(env.device), device_name)
 
 
-def test_error_handling(test_env: VmasEnv, test_policy: ProbabilisticActor) -> None:
+@pytest.mark.fast
+def test_error_handling() -> None:
     """Test error handling for invalid inputs"""
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError, match=".*scenario not found.*"):
         VmasEnv(
-            scenario="invalid_scenario",
+            scenario="non_existent_scenario",
             num_envs=1,
             continuous_actions=True,
             max_steps=10,

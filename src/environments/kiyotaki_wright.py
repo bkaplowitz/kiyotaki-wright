@@ -2,18 +2,132 @@ from typing import cast
 
 import plotly.graph_objects as go  # type: ignore
 import torch
-from vmas.simulator.core import Agent, World  # type: ignore
+from vmas.simulator.core import (  # type: ignore
+    ANGULAR_FRICTION,
+    COLLISION_FORCE,
+    DRAG,
+    JOINT_FORCE,
+    LINEAR_FRICTION,
+    TORQUE_CONSTRAINT_FORCE,
+    Agent,
+    Callable,
+    Dynamics,
+    Entity,
+    Sensor,
+    Sequence,
+    Shape,
+    World,
+)
 from vmas.simulator.scenario import BaseScenario  # type: ignore
 from vmas.simulator.utils import Color  # type: ignore
 
 
 class KiyotakiAgent(Agent):
-    def __init__(self, name: str, collide: bool = False) -> None:
-        super().__init__(name=name, collide=collide)
-        self.type: int
-        self.holding: int
-        self.just_traded: bool
-        self.steps_without_trade: torch.Tensor
+    def __init__(
+        self,
+        name: str,
+        type: int,
+        holding: int,
+        just_traded: bool = False,
+        steps_without_trade: torch.Tensor | None = None,
+        shape: Shape = None,  # type: ignore
+        movable: bool = True,
+        rotatable: bool = True,
+        collide: bool = True,
+        density: float = 25,
+        mass: float = 1,
+        f_range: float = None,  # type: ignore
+        max_f: float = None,  # type: ignore
+        t_range: float = None,  # type: ignore
+        max_t: float = None,  # type: ignore
+        v_range: float = None,  # type: ignore
+        max_speed: float = None,  # type: ignore
+        color: Color = Color.BLUE,
+        alpha: float = 0.5,
+        obs_range: float = None,  # type: ignore
+        obs_noise: float = None,  # type: ignore
+        u_noise: float | Sequence[float] = 0,
+        u_range: float | Sequence[float] = 1,
+        u_multiplier: float | Sequence[float] = 1,  # type: ignore
+        action_script: Callable[[Agent, World], None] = None,  # type: ignore
+        sensors: list[Sensor] = None,  # type: ignore
+        c_noise: float = 0,
+        silent: bool = True,
+        adversary: bool = False,
+        drag: float = None,  # type: ignore
+        linear_friction: float | None = None,  # type: ignore
+        angular_friction: float | None = None,  # type: ignore
+        gravity: float | None = None,  # type: ignore
+        collision_filter: Callable[[Entity], bool] = lambda _: True,
+        render_action: bool = False,
+        dynamics: Dynamics = None,  # type: ignore
+        action_size: int = None,  # type: ignore
+        discrete_action_nvec: list[int] = None,  # type: ignore
+    ) -> None:
+        super().__init__(
+            name,
+            shape,
+        )
+        self.type = type
+        self.holding = holding
+        self.just_traded = just_traded
+        self.steps_without_trade = (
+            torch.tensor(0.0) if steps_without_trade is None else steps_without_trade
+        )
+
+
+class TradingNetwork(World):
+    def __init__(
+        self,
+        batch_dim: int,
+        device: torch.device,
+        dt: float = 0.1,
+        substeps: int = 1,
+        drag: float = DRAG,
+        linear_friction: float = LINEAR_FRICTION,
+        angular_friction: float = ANGULAR_FRICTION,
+        x_semidim: float | None = None,
+        y_semidim: float | None = None,
+        dim_c: int = 0,
+        collision_force: float = COLLISION_FORCE,
+        joint_force: float = JOINT_FORCE,
+        torque_constraint_force: float = TORQUE_CONSTRAINT_FORCE,
+        contact_margin: float = 0.001,
+        gravity: tuple[float, float] = (0, 0),
+    ) -> None:
+        super().__init__(
+            batch_dim,
+            device,
+            dt,
+            substeps,
+            drag,
+            linear_friction,
+            angular_friction,
+            x_semidim,  # type: ignore
+            y_semidim,  # type: ignore
+            dim_c,
+            collision_force,
+            joint_force,
+            torque_constraint_force,
+            contact_margin,
+            gravity,
+        )
+        self.edges: list[tuple[int, int]] = []
+        self._agents: list[KiyotakiAgent] = []
+
+    def add_agent(self, agent: KiyotakiAgent) -> None:
+        """Only way to add agents to the world"""
+        agent.batch_dim = self._batch_dim
+        agent.to(self._device)
+        agent._spawn(dim_c=self._dim_c, dim_p=self.dim_p)
+        self._agents.append(agent)
+
+    def add_edge(self, agent1_id: int, agent2_id: int) -> None:
+        self.edges.append((agent1_id, agent2_id))
+
+    @property
+    def agents(self) -> list[KiyotakiAgent]:
+        return self._agents
 
 
 class KiyotakiWrightScenario(BaseScenario):
@@ -33,19 +147,43 @@ class KiyotakiWrightScenario(BaseScenario):
         self.max_steps_without_trade = 50
 
     def make_world(
-        self, batch_dim: int, device: torch.device, n_agents: int = 9
-    ) -> World:
+        self,
+        batch_dim: int,
+        device: torch.device,
+        types: Sequence[int] = (0, 1, 2),
+        n_agents: int = 9,
+        initial_holdings: Sequence[int] | None = None,
+    ) -> TradingNetwork:
         """Create a new world with specified number of agents"""
-        world = World(batch_dim=batch_dim, device=device)
+        world = TradingNetwork(batch_dim=batch_dim, device=device)
 
-        # Ensure number of agents is divisible by 3
-        assert n_agents % 3 == 0, "Number of agents must be divisible by 3"
-        agents_per_type = n_agents // 3
+        # Ensure number of agents is divisible by number of types
+        if n_agents % len(types) != 0:
+            raise ValueError("Number of agents must be divisible by number of types")
+
+        # Generate initial holdings if not provided
+        # In Kiyotaki-Wright, type i agents initially hold good i+1 (mod 3)
+        if initial_holdings is None:
+            agents_per_type = n_agents // len(types)
+            initial_holdings = []
+            for type_idx in types:
+                holding = (type_idx + 1) % len(types)  # Each type holds next good
+                initial_holdings.extend([holding] * agents_per_type)
+
+        if n_agents % len(initial_holdings) != 0:
+            raise ValueError(
+                f"Expected {n_agents} initial holdings, got {len(initial_holdings)}"
+            )
 
         # Add agents
         for i in range(n_agents):
-            agent = KiyotakiAgent(name=f"agent_{i}", collide=False)
-            agent.type = i // agents_per_type  # 0, 1, or 2
+            agent_type = types[i % len(types)]
+            agent = KiyotakiAgent(
+                name=f"agent_{i}",
+                collide=False,
+                type=agent_type,
+                holding=agent_type,
+            )
             agent.holding = (agent.type + 1) % 3  # Each type produces next good
             agent.just_traded = False
             agent.steps_without_trade = torch.zeros(batch_dim, device=device)
