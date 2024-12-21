@@ -294,6 +294,12 @@ def render_policy(
             # Step environment
             next_tensordict = render_env.step(tensordict)
 
+            # Ensure reward key is properly set
+            if ("agents", "reward") not in next_tensordict:
+                next_tensordict.set(
+                    ("agents", "reward"), next_tensordict.get(env.reward_key)
+                )
+
             # Update done flag and reward
             done = next_tensordict["done"].any().item()
             # Access reward through the proper key structure

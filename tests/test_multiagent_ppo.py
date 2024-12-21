@@ -86,9 +86,28 @@ def test_environment_creation(test_env: VmasEnv) -> None:
 @pytest.mark.timeout(300)
 def test_policy_creation(test_policy: ProbabilisticActor) -> None:
     """Test policy network creation and properties"""
-    check.is_instance(test_policy, ProbabilisticActor)
-    check.is_true(hasattr(test_policy, "module"))
-    check.is_true(hasattr(test_policy, "distribution_class"))
+    check.is_instance(
+        test_policy,
+        ProbabilisticActor,
+        "Policy should be an instance of ProbabilisticActor",
+    )
+
+    # Check for required attributes with detailed messages
+    check.is_true(
+        hasattr(test_policy, "module"),
+        f"Policy missing required attribute: module. "
+        f"Available attributes: {dir(test_policy)}",
+    )
+
+    # Instead of checking for distribution_class directly, verify the policy
+    # can generate distributions by checking if it has the necessary methods
+    required_methods = ["get_dist", "random_sample"]
+    for method in required_methods:
+        check.is_true(
+            hasattr(test_policy, method),
+            f"Policy missing required method: {method}. "
+            f"Available methods: {[attr for attr in dir(test_policy) if not attr.startswith('_')]}",
+        )
 
 
 @pytest.mark.timeout(300)
@@ -114,9 +133,28 @@ def test_environment_step(test_env: VmasEnv, test_policy: ProbabilisticActor) ->
         tensordict = test_policy(tensordict)
     next_tensordict = test_env.step(tensordict)
 
-    check.is_true("reward" in next_tensordict)
-    check.is_true("done" in next_tensordict)
-    check.is_true(("agents", "observation") in next_tensordict)
+    # Check tensordict structure with detailed messages
+    check.is_true(
+        ("next", "agents", "reward") in next_tensordict,
+        f"Reward key not found in tensordict. Available keys: {next_tensordict.keys(True)}",
+    )
+    check.is_true(
+        "done" in next_tensordict,
+        f"Done flag not found in tensordict. Available keys: {next_tensordict.keys(True)}",
+    )
+    check.is_true(
+        ("agents", "observation") in next_tensordict,
+        f"Observation not found in tensordict. Available keys: {next_tensordict.keys(True)}",
+    )
+
+    # Check reward key structure with more context
+    reward_found = ("next", "agents", "reward") in next_tensordict
+    if not reward_found:
+        available_keys = list(next_tensordict.keys(True))
+        raise AssertionError(
+            f"Expected reward key not found. Looking for ('next', 'agents', 'reward'). "
+            f"Available keys: {available_keys}"
+        )
 
 
 @pytest.mark.timeout(600)
