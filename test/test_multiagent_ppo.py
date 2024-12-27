@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 import pytest_check as check
 import torch
+from tensordict import TensorDictBase
 
 from src.multiagent_ppo import (
     MultiAgentMLP,
@@ -195,7 +196,7 @@ class TestTrainingAndRendering:
         # Mock step to return done=True after first step
         original_step = test_env.step
 
-        def quick_step(tensordict):
+        def quick_step(tensordict: TensorDictBase) -> TensorDictBase:
             result = original_step(tensordict)
             result["done"] = torch.tensor([True])  # Force early termination
             return result

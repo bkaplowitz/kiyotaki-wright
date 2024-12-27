@@ -6,6 +6,10 @@
 	"pixi-vscode.defaultPlatforms": [
 		"osx-arm64"
 	],
+	"python.analysis.extraPaths": [
+		"/Users/bkaplowitz/Developer/work/aiyagari_q_learning.worktrees/kiyotaki_wright/src",
+		"/Users/bkaplowitz/Developer/work/aiyagari_q_learning.worktrees/kiyotaki_wright/test",
+	],
 	"python.analysis.enablePytestSupport": true,
 	"python.testing.pytestEnabled": true,
 	"python.testing.unittestEnabled": false,
@@ -45,7 +49,10 @@
 			"depth": 4
 		}
 	],
-	"python.analysis.stubPath": "stubs",
-	"python.testing.cwd": "test",
-	"pythonTestExplorer.testFramework": "pytest"
+	"python.analysis.stubPath": "/Users/bkaplowitz/Developer/work/aiyagari_q_learning.worktrees/kiyotaki_wright/stubs",
+	"python.testing.pytestPath": "/Users/bkaplowitz/Developer/work/aiyagari_q_learning.worktrees/kiyotaki_wright/.pixi/envs/default/bin/pytest",
+	"python.analysis.inlayHints.pytestParameters": true,
+	"testing.coverageToolbarEnabled": true,
+	"typescript.disableAutomaticTypeAcquisition": false,
+	"workbench.experimental.cloudChanges.autoStore": "onShutdown"
 }
