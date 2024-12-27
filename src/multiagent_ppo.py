@@ -264,65 +264,33 @@ def train_vmas() -> tuple[TransformedEnv, ProbabilisticActor]:
 
 
 def render_policy(
-    env: TransformedEnv, policy: ProbabilisticActor, num_episodes: int = 3
+    env: TransformedEnv,
+    policy: ProbabilisticActor,
+    num_episodes: int = 1,
 ) -> None:
-    """Render the trained policy in action"""
-    # Create a single environment for rendering
-    render_env = VmasEnv(
-        scenario="navigation",
-        num_envs=1,  # Only one environment for rendering
-        continuous_actions=True,
-        max_steps=100,
-        device=vmas_device,
-        n_agents=3,
-        # Note: render_mode might need to be handled differently depending on your system
-    )
+    """Render policy behavior in the environment."""
+    print(f"\nEpisode {num_episodes}")
 
-    for episode in range(num_episodes):
-        print(f"\nEpisode {episode + 1}")
-
-        # Reset environment
-        tensordict = render_env.reset()
+    for _ in range(num_episodes):
+        tensordict = env.reset()
         done = False
-        episode_reward = 0
+
+        # Debug shape before first policy call
+        observation = tensordict[("agents", "observation")]
+        if observation.shape[-2] != env.n_agents:
+            raise ValueError(
+                f"Observation shape mismatch. Expected {env.n_agents} agents, "
+                f"got shape {observation.shape}"
+            )
 
         while not done:
-            # Get action from policy
             with torch.no_grad():
                 tensordict = policy(tensordict)
+            tensordict = env.step(tensordict)
+            done = tensordict["done"].any().item()
+            env.render()
 
-            # Step environment
-            next_tensordict = render_env.step(tensordict)
-
-            # Ensure reward key is properly set
-            if ("agents", "reward") not in next_tensordict:
-                next_tensordict.set(
-                    ("agents", "reward"), next_tensordict.get(env.reward_key)
-                )
-
-            # Update done flag and reward
-            done = next_tensordict["done"].any().item()
-            # Access reward through the proper key structure
-            reward = next_tensordict[("agents", "reward")].sum().item()
-            episode_reward += reward
-
-            # Update tensordict for next iteration
-            tensordict = next_tensordict
-
-            # Try different rendering approaches
-            try:
-                render_env.render()
-            except Exception as e:
-                print(f"Rendering failed: {e}")
-                # Alternative rendering approach
-                try:
-                    render_env.env.render()
-                except Exception as e:
-                    print(f"Alternative rendering also failed: {e}")
-
-        print(f"Episode reward: {episode_reward:.2f}")
-
-    render_env.close()
+    env.close()
 
 
 def train_kiyotaki_wright(

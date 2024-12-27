@@ -12,3 +12,21 @@ markers = [
 	"fast: marks tests as fast (deselect with '-m \"not fast\"')",
 	"slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+addopts = "--cov=src --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = [
+	"src",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+	"pragma: no cover",
+	"def __repr__",
+	"if self.debug:",
+	"raise NotImplementedError",
+	"if __name__ == .__main__.:",
+	"pass",
+	"raise ImportError",
+]

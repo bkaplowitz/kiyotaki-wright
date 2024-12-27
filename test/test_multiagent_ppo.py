@@ -173,16 +173,31 @@ class TestTrainingAndRendering:
     ) -> None:
         """Test render policy function with mocked rendering"""
         test_env.n_agents = 2
+        test_env.scenario.n_agents = 2
 
         mocker.patch.object(test_env, "render")
         mocker.patch.object(test_env, "close")
         transformed_env = TransformedEnv(test_env)
-        _ = transformed_env.reset()
+
+        tensordict = transformed_env.reset()
+        observation = tensordict[("agents", "observation")]
+        check.equal(
+            observation.shape[-2],
+            2,
+            f"Expected 2 agents in observation, got shape {observation.shape}",
+        )
 
         try:
             render_policy(transformed_env, test_policy, num_episodes=1)
         except ValueError as e:
-            pytest.fail(f"Shape mismatch in render_policy: {e!s}")
+            tensordict = transformed_env.reset()
+            observation = tensordict[("agents", "observation")]
+            pytest.fail(
+                f"Shape mismatch in render_policy: {e!s}\n"
+                f"Environment n_agents: {test_env.n_agents}\n"
+                f"Policy n_agents: {test_policy.module[0].module[0].n_agents}\n"
+                f"Observation shape: {observation.shape}"
+            )
 
         check.is_true(test_env.render.called)
         check.is_true(test_env.close.called)
