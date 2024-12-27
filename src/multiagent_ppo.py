@@ -271,11 +271,14 @@ def render_policy(
     """Render policy behavior in the environment."""
     print(f"\nEpisode {num_episodes}")
 
-    for _ in range(num_episodes):
+    for episode in range(num_episodes):
+        print(f"Starting episode {episode + 1}")
         tensordict = env.reset()
         done = False
+        steps = 0
+        max_steps = 100  # Add safety limit
 
-        # Debug shape before first policy call
+        # Verify shapes match before starting
         observation = tensordict[("agents", "observation")]
         if observation.shape[-2] != env.n_agents:
             raise ValueError(
@@ -283,12 +286,15 @@ def render_policy(
                 f"got shape {observation.shape}"
             )
 
-        while not done:
+        while not done and steps < max_steps:
             with torch.no_grad():
                 tensordict = policy(tensordict)
             tensordict = env.step(tensordict)
             done = tensordict["done"].any().item()
             env.render()
+            steps += 1
+
+        print(f"Episode {episode + 1} completed in {steps} steps")
 
     env.close()
 
