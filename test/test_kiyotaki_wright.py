@@ -397,6 +397,31 @@ class TestLearningDynamics(TestKiyotakiWrightBase):
                 "Agent 2 should benefit more than trading cost",
             )
 
+    def test_trading_value_consistency_reversed(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that value estimates imply consistent trading decisions"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        # Setup two agents for trading
+        agent1 = world.agents[0]
+        agent2 = world.agents[1]
+        agent1.holding = 1
+        agent2.holding = 2
+        # Set agents preferences to be opposite
+        agent1.type = 2
+        agent2.type = 1
+        # Verify that agents should not trade
+        check.is_false(scenario.should_trade(agent1, agent2, world))
+
     @pytest.mark.fast
     def test_learning_convergence(
         self, scenario: KiyotakiWrightScenario, device: torch.device

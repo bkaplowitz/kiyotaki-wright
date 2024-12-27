@@ -1,5 +1,5 @@
 from typing import Required, TypedDict, TypeVar, cast, override
-
+from typing import Callable
 import plotly.graph_objects as go  # type: ignore
 import torch
 from pyparsing import Any
@@ -75,6 +75,9 @@ class KiyotakiWrightScenario(BaseScenario):
     def __init__(self) -> None:
         super().__init__()
         # Storage costs for each good type
+        self.preferences: Callable[[int, int], float] = lambda preferred_type, current_type: -1/2*(
+            preferred_type - current_type
+        )**2
         self._world: TradingNetwork | None = None
         self.storage_costs = torch.tensor([0.3, 0.2, 0.1])
         # Consumption values for each agent type
@@ -629,9 +632,10 @@ class KiyotakiWrightScenario(BaseScenario):
     def get_value(self, agent: KiyotakiAgent, world: TradingNetwork) -> float:
         """Get the current value estimate for an agent's state"""
         state = (agent.type, agent.holding)
+        # Assume preferences are single peaked always
+        self._value_table =
         if state not in self._value_table:
-            # Initialize with a small random value
-            self._value_table[state] = torch.rand(1).item() * 0.1
+            self._value_table[state] =
         return self._value_table[state]
 
     def update_value(
