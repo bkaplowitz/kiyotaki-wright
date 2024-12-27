@@ -167,6 +167,7 @@ class TestTrainingAndRendering:
         check.is_instance(env, TransformedEnv)
         check.is_instance(policy, ProbabilisticActor)
 
+    @pytest.mark.timeout(100)
     @pytest.mark.slow
     def test_render_policy(
         self, test_env: VmasEnv, test_policy: ProbabilisticActor, mocker: Any
@@ -243,12 +244,3 @@ class TestDeviceAndErrors:
                 device=torch.device("cpu"),
                 n_agents=2,
             )
-
-
-if __name__ == "__main__":
-    pytest.main([
-        __file__,
-        "-v",
-        "--cov=src.multiagent_ppo",
-        "--cov-report=term-missing",
-    ])
