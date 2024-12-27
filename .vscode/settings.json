@@ -54,5 +54,11 @@
 	"python.analysis.inlayHints.pytestParameters": true,
 	"testing.coverageToolbarEnabled": true,
 	"typescript.disableAutomaticTypeAcquisition": false,
-	"workbench.experimental.cloudChanges.autoStore": "onShutdown"
+	"workbench.experimental.cloudChanges.autoStore": "onShutdown",
+	"testing.coverageBarThresholds": {
+
+		"red": 0,
+		"yellow": 60,
+		"green": 90
+	}
 }

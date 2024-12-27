@@ -266,3 +266,224 @@ class TestWorldReset(TestKiyotakiWrightBase):
                     device,
                     "Agent tensor on wrong device after single reset",
                 )
+
+
+class TestLearningDynamics(TestKiyotakiWrightBase):
+    """Tests for learning dynamics and value updates"""
+
+    @pytest.mark.fast
+    def test_value_updates(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that positive TD errors lead to value increases"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        # Setup test agent
+        agent = world.agents[0]
+        _initial_state = (agent.type, agent.holding)
+
+        # Record initial value
+        initial_value = scenario.get_value(agent, world)
+
+        # Simulate positive TD error
+        reward = 1.0
+        next_value = 0.0  # Terminal state for simplicity
+        td_error = reward + scenario.gamma * next_value - initial_value
+
+        # Update with positive TD error
+        scenario.update_value(agent, world, td_error)
+
+        # Check value increased
+        new_value = scenario.get_value(agent, world)
+        check.greater(
+            new_value,
+            initial_value,
+            f"Value should increase with positive TD error.\n"
+            f"Initial value: {initial_value}\n"
+            f"New value: {new_value}\n"
+            f"TD error: {td_error}",
+        )
+
+    @pytest.mark.fast
+    def test_negative_td_error(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that negative TD errors lead to value decreases"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        # Setup test agent
+        agent = world.agents[0]
+
+        # Record initial value
+        initial_value = scenario.get_value(agent, world)
+
+        # Simulate negative TD error
+        reward = -1.0
+        next_value = 0.0
+        beta = 0.9
+        td_error = reward + beta * next_value - initial_value
+
+        # Update with negative TD error
+        scenario.update_value(agent, world, td_error)
+
+        # Check value decreased
+        new_value = scenario.get_value(agent, world)
+        check.less(
+            new_value,
+            initial_value,
+            f"Value should decrease with negative TD error.\n"
+            f"Initial value: {initial_value}\n"
+            f"New value: {new_value}\n"
+            f"TD error: {td_error}",
+        )
+
+    @pytest.mark.fast
+    def test_trading_value_consistency(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that trading decisions are consistent with value estimates"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        # Setup two agents for trading
+        agent1 = world.agents[0]
+        agent2 = world.agents[1]
+
+        # Get initial values
+        value1_before = scenario.get_value(agent1, world)
+        value2_before = scenario.get_value(agent2, world)
+
+        # Simulate trading decision
+        should_trade = scenario.should_trade(agent1, agent2, world)
+
+        if should_trade:
+            # If agents decide to trade, both agents should benefit after trading costs
+            scenario.trade(agent1, agent2, world)
+
+            value1_after = scenario.get_value(agent1, world)
+            value2_after = scenario.get_value(agent2, world)
+
+            check.greater(
+                value1_after - value1_before,
+                scenario.trading_cost,
+                "Agent 1 should benefit more than trading cost",
+            )
+            check.greater(
+                value2_after - value2_before,
+                scenario.trading_cost,
+                "Agent 2 should benefit more than trading cost",
+            )
+
+    @pytest.mark.fast
+    def test_learning_convergence(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that values converge with repeated updates"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        agent = world.agents[0]
+
+        # Record initial value
+        initial_value = scenario.get_value(agent, world)
+
+        # Calculate theoretical bounds
+        max_possible_value = scenario.consumption_values.max() / (1 - scenario.gamma)
+        min_possible_value = -scenario.storage_costs.max() / (1 - scenario.gamma)
+
+        # Perform multiple updates with decreasing TD errors
+        values = [initial_value]
+        n_updates = 10
+
+        for i in range(n_updates):
+            # TD error decreases over time and stays within theoretical bounds
+
+            td_error = (max_possible_value.item() - initial_value) * (1 - i / n_updates)
+            scenario.update_value(agent, world, td_error)
+            new_value = scenario.get_value(agent, world)
+            values.append(new_value)
+
+            # Check value stays within bounds
+            check.greater(
+                new_value,
+                min_possible_value,
+                f"Value {new_value} below theoretical minimum {min_possible_value}",
+            )
+            check.less(
+                new_value,
+                max_possible_value,
+                f"Value {new_value} above theoretical maximum {max_possible_value}",
+            )
+
+        # Check convergence
+        deltas = [abs(values[i + 1] - values[i]) for i in range(len(values) - 1)]
+        check.is_true(
+            deltas[-1] < deltas[0],
+            f"Value updates should converge. Initial delta: {deltas[0]}, "
+            f"Final delta: {deltas[-1]}",
+        )
+
+    @pytest.mark.fast
+    def test_value_bounds(
+        self, scenario: KiyotakiWrightScenario, device: torch.device
+    ) -> None:
+        """Test that values stay within reasonable bounds"""
+        batch_dim = 1
+        world = scenario.env_make_world(
+            batch_dim=batch_dim,
+            device=device,
+            n_agents=3,
+            types=(0, 1, 2),
+            initial_holdings=None,
+        )
+        world = cast(TradingNetwork, world)
+
+        for agent in world.agents:
+            value = scenario.get_value(agent, world)
+
+            # Values should be bounded by theoretical limits
+            max_possible_value = scenario.consumption_values.max() / (
+                1 - scenario.gamma
+            )
+            min_possible_value = -scenario.storage_costs.max() / (1 - scenario.gamma)
+
+            check.less(
+                value,
+                max_possible_value,
+                f"Value exceeds theoretical maximum: {value} > {max_possible_value}",
+            )
+            check.greater(
+                value,
+                min_possible_value,
+                f"Value below theoretical minimum: {value} < {min_possible_value}",
+            )

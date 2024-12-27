@@ -73,6 +73,7 @@ class WorldArgs(TypedDict, total=False):
 
 class KiyotakiWrightScenario(BaseScenario):
     def __init__(self) -> None:
+        super().__init__()
         # Storage costs for each good type
         self._world: TradingNetwork | None = None
         self.storage_costs = torch.tensor([0.3, 0.2, 0.1])
@@ -86,6 +87,11 @@ class KiyotakiWrightScenario(BaseScenario):
         self.meeting_prob = 0.8
         # Maximum steps without trading before reset
         self.max_steps_without_trade = 50
+        # Add discount factor for value calculations
+        self.gamma = 0.95
+        # Initialize value function table
+        self._value_table: dict[tuple[int, int], float] = {}
+        self._learning_rate = 0.1
 
     @override
     def make_world(
@@ -619,3 +625,70 @@ class KiyotakiWrightScenario(BaseScenario):
 
         plt.tight_layout()
         plt.show()
+
+    def get_value(self, agent: KiyotakiAgent, world: TradingNetwork) -> float:
+        """Get the current value estimate for an agent's state"""
+        state = (agent.type, agent.holding)
+        if state not in self._value_table:
+            # Initialize with a small random value
+            self._value_table[state] = torch.rand(1).item() * 0.1
+        return self._value_table[state]
+
+    def update_value(
+        self, agent: KiyotakiAgent, world: TradingNetwork, td_error: float
+    ) -> None:
+        """Update value estimate using TD error"""
+        state = (agent.type, agent.holding)
+        current_value = self.get_value(agent, world)
+        self._value_table[state] = current_value + self._learning_rate * td_error
+
+    def should_trade(
+        self, agent1: KiyotakiAgent, agent2: KiyotakiAgent, world: TradingNetwork
+    ) -> bool:
+        """
+        Determine if two agents should trade based on their value functions.
+        Trade occurs only if both agents benefit individually (individually rational).
+        """
+        # Get current values
+        value1_before = self.get_value(agent1, world)
+        value2_before = self.get_value(agent2, world)
+
+        # Simulate trade
+        holding1, holding2 = agent1.holding, agent2.holding
+        agent1.holding, agent2.holding = holding2, holding1
+
+        # Get post-trade values
+        value1_after = self.get_value(agent1, world)
+        value2_after = self.get_value(agent2, world)
+
+        # Restore original holdings
+        agent1.holding, agent2.holding = holding1, holding2
+
+        # Trade only if both agents benefit after accounting for trading costs
+        agent1_benefit = value1_after - value1_before > self.trading_cost
+        agent2_benefit = value2_after - value2_before > self.trading_cost
+
+        return agent1_benefit and agent2_benefit
+
+    def trade_individual_welfare(
+        self, agent1: KiyotakiAgent, agent2: KiyotakiAgent, world: TradingNetwork
+    ) -> tuple[float, float]:
+        """Compute the welfare of a trade"""
+        agent1_benefit = self.get_value(agent1, world) - self.get_value(agent1, world)
+        agent2_benefit = self.get_value(agent2, world) - self.get_value(agent2, world)
+        return agent1_benefit, agent2_benefit
+
+    def trade(
+        self, agent1: KiyotakiAgent, agent2: KiyotakiAgent, world: TradingNetwork
+    ) -> None:
+        """Execute trade between two agents"""
+        # Swap holdings
+        agent1.holding, agent2.holding = agent2.holding, agent1.holding
+
+        # Mark agents as having just traded
+        agent1.just_traded = True
+        agent2.just_traded = True
+
+        # Reset steps without trade
+        agent1.steps_without_trade.zero_()
+        agent2.steps_without_trade.zero_()
