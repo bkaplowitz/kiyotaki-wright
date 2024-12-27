@@ -1,45 +1,48 @@
 {
-	"python.analysis.typeCheckingMode": "basic",
-	"python.languageServer": "Pylance",
-	"mypy-type-checker.importStrategy": "fromEnvironment",
-	"files.autoSave": "onFocusChange",
-	"pixi-vscode.defaultPlatforms": [
-		"osx-arm64"
-	],
-	"python.analysis.persistAllIndices": true,
-	"python.analysis.packageIndexDepths": [
+    "python.analysis.typeCheckingMode": "basic",
+    "python.languageServer": "Pylance",
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "files.autoSave": "onFocusChange",
+    "pixi-vscode.defaultPlatforms": [
+        "osx-arm64"
+    ],
+    "python.analysis.persistAllIndices": true,
+    "python.analysis.packageIndexDepths": [
 
-		{
-			"name": "sklearn",
-			"depth": 2
-		},
-		{
-			"name": "matplotlib",
-			"depth": 2
-		},
-		{
-			"name": "scipy",
-			"depth": 2
-		},
-		{
-			"name": "django",
-			"depth": 2
-		},
-		{
-			"name": "flask",
-			"depth": 2
-		},
-		{
-			"name": "fastapi",
-			"depth": 2
-		},
-		{
-			"name": "torch",
-			"depth": 4
-		},
-		{
-			"name": "torchrl",
-			"depth": 4
-		}
-	]
+        {
+            "name": "sklearn",
+            "depth": 2
+        },
+        {
+            "name": "matplotlib",
+            "depth": 2
+        },
+        {
+            "name": "scipy",
+            "depth": 2
+        },
+        {
+            "name": "django",
+            "depth": 2
+        },
+        {
+            "name": "flask",
+            "depth": 2
+        },
+        {
+            "name": "fastapi",
+            "depth": 2
+        },
+        {
+            "name": "torch",
+            "depth": 4
+        },
+        {
+            "name": "torchrl",
+            "depth": 4
+        }
+    ],
+    "python.analysis.stubPath": "stubs",
+    "python.testing.cwd": "test",
+    "pythonTestExplorer.testFramework": "pytest"
 }

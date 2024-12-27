@@ -1,25 +1,15 @@
-from typing import cast
+from typing import Required, TypedDict, TypeVar, cast, override
 
 import plotly.graph_objects as go  # type: ignore
 import torch
+from pyparsing import Any
 from vmas.simulator.core import (  # type: ignore
-    ANGULAR_FRICTION,
-    COLLISION_FORCE,
-    DRAG,
-    JOINT_FORCE,
-    LINEAR_FRICTION,
-    TORQUE_CONSTRAINT_FORCE,
     Agent,
-    Callable,
-    Dynamics,
-    Entity,
-    Sensor,
-    Sequence,
     Shape,
     World,
 )
-from vmas.simulator.scenario import BaseScenario  # type: ignore
-from vmas.simulator.utils import Color  # type: ignore
+from vmas.simulator.scenario import BaseScenario
+from vmas.simulator.utils import Color
 
 
 class KiyotakiAgent(Agent):
@@ -28,45 +18,15 @@ class KiyotakiAgent(Agent):
         name: str,
         type: int,
         holding: int,
+        shape: Shape | None = None,
         just_traded: bool = False,
         steps_without_trade: torch.Tensor | None = None,
-        shape: Shape = None,  # type: ignore
-        movable: bool = True,
-        rotatable: bool = True,
-        collide: bool = True,
-        density: float = 25,
-        mass: float = 1,
-        f_range: float = None,  # type: ignore
-        max_f: float = None,  # type: ignore
-        t_range: float = None,  # type: ignore
-        max_t: float = None,  # type: ignore
-        v_range: float = None,  # type: ignore
-        max_speed: float = None,  # type: ignore
-        color: Color = Color.BLUE,
-        alpha: float = 0.5,
-        obs_range: float = None,  # type: ignore
-        obs_noise: float = None,  # type: ignore
-        u_noise: float | Sequence[float] = 0,
-        u_range: float | Sequence[float] = 1,
-        u_multiplier: float | Sequence[float] = 1,  # type: ignore
-        action_script: Callable[[Agent, World], None] = None,  # type: ignore
-        sensors: list[Sensor] = None,  # type: ignore
-        c_noise: float = 0,
-        silent: bool = True,
-        adversary: bool = False,
-        drag: float = None,  # type: ignore
-        linear_friction: float | None = None,  # type: ignore
-        angular_friction: float | None = None,  # type: ignore
-        gravity: float | None = None,  # type: ignore
-        collision_filter: Callable[[Entity], bool] = lambda _: True,
-        render_action: bool = False,
-        dynamics: Dynamics = None,  # type: ignore
-        action_size: int = None,  # type: ignore
-        discrete_action_nvec: list[int] = None,  # type: ignore
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             name,
-            shape,
+            shape,  # type: ignore
+            **kwargs,
         )
         self.type = type
         self.holding = holding
@@ -76,64 +36,45 @@ class KiyotakiAgent(Agent):
         )
 
 
+# Define a type variable for agent type
+T = TypeVar("T", bound=Agent)
+
+
 class TradingNetwork(World):
-    def __init__(
-        self,
-        batch_dim: int,
-        device: torch.device,
-        dt: float = 0.1,
-        substeps: int = 1,
-        drag: float = DRAG,
-        linear_friction: float = LINEAR_FRICTION,
-        angular_friction: float = ANGULAR_FRICTION,
-        x_semidim: float | None = None,
-        y_semidim: float | None = None,
-        dim_c: int = 0,
-        collision_force: float = COLLISION_FORCE,
-        joint_force: float = JOINT_FORCE,
-        torque_constraint_force: float = TORQUE_CONSTRAINT_FORCE,
-        contact_margin: float = 0.001,
-        gravity: tuple[float, float] = (0, 0),
-    ) -> None:
-        super().__init__(
-            batch_dim,
-            device,
-            dt,
-            substeps,
-            drag,
-            linear_friction,
-            angular_friction,
-            x_semidim,  # type: ignore
-            y_semidim,  # type: ignore
-            dim_c,
-            collision_force,
-            joint_force,
-            torque_constraint_force,
-            contact_margin,
-            gravity,
-        )
+    """Trading network specialized for KiyotakiAgent"""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self.edges: list[tuple[int, int]] = []
+        # Change to list instead of Sequence to match parent
         self._agents: list[KiyotakiAgent] = []
 
-    def add_agent(self, agent: KiyotakiAgent) -> None:
+    @override
+    def add_agent(self, agent: Agent) -> None:
         """Only way to add agents to the world"""
-        agent.batch_dim = self._batch_dim
-        agent.to(self._device)
-        agent._spawn(dim_c=self._dim_c, dim_p=self.dim_p)
-        self._agents.append(agent)
+        if not isinstance(agent, KiyotakiAgent):
+            raise TypeError("TradingNetwork only accepts KiyotakiAgent instances")
+        super().add_agent(agent)
 
     def add_edge(self, agent1_id: int, agent2_id: int) -> None:
         self.edges.append((agent1_id, agent2_id))
 
     @property
+    @override
     def agents(self) -> list[KiyotakiAgent]:
         return self._agents
 
 
+class WorldArgs(TypedDict, total=False):
+    types: Required[tuple[int, ...]]
+    n_agents: Required[int]
+    initial_holdings: Required[tuple[int, ...]]
+
+
 class KiyotakiWrightScenario(BaseScenario):
     def __init__(self) -> None:
-        super().__init__()
         # Storage costs for each good type
+        self._world: TradingNetwork | None = None
         self.storage_costs = torch.tensor([0.3, 0.2, 0.1])
         # Consumption values for each agent type
         self.consumption_values = torch.tensor([3.0, 3.0, 3.0])
@@ -146,16 +87,28 @@ class KiyotakiWrightScenario(BaseScenario):
         # Maximum steps without trading before reset
         self.max_steps_without_trade = 50
 
+    @override
     def make_world(
         self,
         batch_dim: int,
         device: torch.device,
-        types: Sequence[int] = (0, 1, 2),
-        n_agents: int = 9,
-        initial_holdings: Sequence[int] | None = None,
+        **kwargs: Any,
     ) -> TradingNetwork:
         """Create a new world with specified number of agents"""
+        # Extract kwargs with defaults
+        assert isinstance(kwargs, dict) and {
+            "types",
+            "n_agents",
+            "initial_holdings",
+        }.issubset(set(kwargs.keys()))
+
+        # Create the world
         world = TradingNetwork(batch_dim=batch_dim, device=device)
+
+        # Set up agents
+        n_agents = kwargs["n_agents"]
+        types = kwargs["types"]
+        initial_holdings = kwargs["initial_holdings"]
 
         # Ensure number of agents is divisible by number of types
         if n_agents % len(types) != 0:
@@ -165,14 +118,16 @@ class KiyotakiWrightScenario(BaseScenario):
         # In Kiyotaki-Wright, type i agents initially hold good i+1 (mod 3)
         if initial_holdings is None:
             agents_per_type = n_agents // len(types)
-            initial_holdings = []
+            initial_holdings_filled: list[int] = []
             for type_idx in types:
                 holding = (type_idx + 1) % len(types)  # Each type holds next good
-                initial_holdings.extend([holding] * agents_per_type)
+                initial_holdings_filled.extend([holding] * agents_per_type)
+        else:
+            initial_holdings_filled = initial_holdings
 
-        if n_agents % len(initial_holdings) != 0:
+        if n_agents % len(initial_holdings_filled) != 0:
             raise ValueError(
-                f"Expected {n_agents} initial holdings, got {len(initial_holdings)}"
+                f"Expected {n_agents} initial holdings, got {len(initial_holdings_filled)}"
             )
 
         # Add agents
@@ -191,28 +146,55 @@ class KiyotakiWrightScenario(BaseScenario):
 
             # Set agent colors based on type
             if agent.type == 0:
-                agent.color = Color.RED
+                agent.color = Color.RED.value
             elif agent.type == 1:
-                agent.color = Color.GREEN
+                agent.color = Color.GREEN.value
             else:
-                agent.color = Color.BLUE
+                agent.color = Color.BLUE.value
 
+        # Important: Set the world before returning
+        self._world = world
         return world
 
-    def reset_world_at(self, world: World, env_index: int | None = None) -> None:
-        """Reset the world state"""
-        for agent in world.agents:
-            agent = cast(KiyotakiAgent, agent)
+    @property
+    @override
+    def world(self) -> TradingNetwork:
+        """The :class:`~vmas.simulator.core.World` associated toi this scenario."""
+        assert self._world is not None, (
+            "You first need to set `self._world` in the `make_world` method"
+        )
+        return self._world
+
+    @override
+    def reset_world_at(self, env_index: int | None = None) -> None:
+        """Reset the world state for specified environment(s)
+
+        Args:
+            env_index: Index of environment to reset. If None, reset all environments.
+        """
+        for agent in self.world.agents:
+            # Reset holding to initial state (type + 1 mod 3)
             agent.holding = (agent.type + 1) % 3
             agent.just_traded = False
+
+            # Reset steps without trade counter
             if env_index is None:
+                # Vectorized reset for all environments
                 agent.steps_without_trade.zero_()
             else:
+                # Reset single environment
                 agent.steps_without_trade[env_index] = 0
+            # Reset agent just traded
+            agent.just_traded = False
 
-    def reward(self, agent: KiyotakiAgent, world: World) -> torch.Tensor:
+    @override
+    def reward(self, agent: Agent) -> torch.Tensor:
         """Calculate reward for an agent"""
-        reward = torch.zeros(world.batch_dim, device=world.device)
+        if not isinstance(agent, KiyotakiAgent):
+            raise TypeError(
+                "Agent must be a KiyotakiAgent, else this method will fail."
+            )
+        reward = torch.zeros(self.world.batch_dim, device=self.world.device)
 
         # Consumption reward if holding preferred good
         preferred_good = agent.type
@@ -233,13 +215,18 @@ class KiyotakiWrightScenario(BaseScenario):
 
         return reward
 
-    def observation(self, agent: KiyotakiAgent, world: World) -> torch.Tensor:
+    @override
+    def observation(self, agent: Agent) -> torch.Tensor:
         """Return observation for an agent"""
         # Local observation (used during execution)
-        type_onehot = torch.zeros(3, device=world.device)
+        if not isinstance(agent, KiyotakiAgent):
+            raise TypeError(
+                "Agent must be a KiyotakiAgent, else this method will fail."
+            )
+        type_onehot = torch.zeros(3, device=self.world.device)
         type_onehot[agent.type] = 1
 
-        holding_onehot = torch.zeros(3, device=world.device)
+        holding_onehot = torch.zeros(3, device=self.world.device)
         holding_onehot[agent.holding] = 1
 
         steps_without_trade_norm = (
@@ -247,13 +234,16 @@ class KiyotakiWrightScenario(BaseScenario):
         )
 
         # Global state information (used during training)
-        all_agents_types = torch.zeros(len(world.agents) * 3, device=world.device)
-        all_agents_holdings = torch.zeros(len(world.agents) * 3, device=world.device)
+        all_agents_types = torch.zeros(
+            len(self.world.agents) * 3, device=self.world.device
+        )
+        all_agents_holdings = torch.zeros(
+            len(self.world.agents) * 3, device=self.world.device
+        )
 
-        for i, other in enumerate(world.agents):
-            agent = cast(KiyotakiAgent, other)
-            all_agents_types[i * 3 + agent.type] = 1
-            all_agents_holdings[i * 3 + agent.holding] = 1
+        for i, other in enumerate(self.world.agents):
+            all_agents_types[i * 3 + other.type] = 1
+            all_agents_holdings[i * 3 + other.holding] = 1
 
         # Concatenate local and global observations
         obs = torch.cat([
@@ -266,16 +256,28 @@ class KiyotakiWrightScenario(BaseScenario):
 
         return obs
 
-    def done(self, agent: KiyotakiAgent, world: World) -> torch.Tensor:
+    @override
+    def done(self) -> torch.Tensor:
         """Return done signal"""
-        # Episode ends if agent hasn't traded for too long
+        # Episode ends if all agents have not traded for too long
+        return torch.tensor(
+            [self.agent_done(agent) for agent in self.world.agents],
+            device=self.world.device,
+        )
+
+    def agent_done(self, agent: KiyotakiAgent) -> torch.Tensor:
+        """Return done signal for an agent"""
         return agent.steps_without_trade >= self.max_steps_without_trade
 
-    def process_action(self, agent: KiyotakiAgent, world: World) -> None:
+    @override
+    def process_action(self, agent: Agent) -> None:
         """Process agent's action"""
+        if not isinstance(agent, KiyotakiAgent):
+            raise TypeError(
+                "Agent must be a KiyotakiAgent, else this method will fail."
+            )
         # Find potential trading partners
-        for other in world.agents:
-            other = cast(KiyotakiAgent, other)
+        for other in self.world.agents:
             if other is agent:
                 continue
 
@@ -292,7 +294,7 @@ class KiyotakiWrightScenario(BaseScenario):
                     other.just_traded = True
 
     def compute_welfare_metrics(
-        self, agent: KiyotakiAgent, world: World
+        self, agent: KiyotakiAgent, world: TradingNetwork
     ) -> dict[str, float]:
         """
         Compute welfare metrics including:
@@ -300,14 +302,13 @@ class KiyotakiWrightScenario(BaseScenario):
         2. Exploitability (how much an agent could gain by deviating)
         """
         # First compute current utility for all agents
-        current_utilities = []
+        current_utilities: list[float] = []
         for a in world.agents:
-            a = cast(KiyotakiAgent, a)
             # Base utility calculation
             utility = -self.storage_costs[a.holding]  # Storage cost
             if a.holding == a.type:  # If holding preferred good
                 utility += self.consumption_values[a.type]
-            current_utilities.append(utility)
+            current_utilities.append(cast(float, utility.item()))
 
         current_social_welfare = sum(current_utilities)
 
@@ -315,7 +316,6 @@ class KiyotakiWrightScenario(BaseScenario):
         # In the optimal case, each agent type holds their preferred good
         optimal_utilities: list[float] = []
         for a in world.agents:
-            a = cast(KiyotakiAgent, a)
             optimal_utility = (
                 self.consumption_values[a.type] - self.storage_costs[a.type]
             ).item()
@@ -348,7 +348,6 @@ class KiyotakiWrightScenario(BaseScenario):
 
             # Include expected future trading opportunities
             for other in world.agents:
-                other = cast(KiyotakiAgent, other)
                 if other is agent:
                     continue
 
@@ -366,12 +365,12 @@ class KiyotakiWrightScenario(BaseScenario):
             best_deviation_value = max(best_deviation_value, deviation_utility.item())
 
         # Exploitability as percentage improvement possible
-        exploitability_pct = (
+        exploitability_pct: float = (
             (best_deviation_value - current_strategy_value)
             / abs(current_strategy_value)
             * 100
             if current_strategy_value != 0
-            else 0
+            else 0.0
         )
 
         return {
@@ -379,7 +378,7 @@ class KiyotakiWrightScenario(BaseScenario):
             "exploitability_pct": exploitability_pct,
         }
 
-    def log_metrics(self, world: World) -> dict[str, float]:
+    def log_metrics(self, world: TradingNetwork) -> dict[str, float]:
         """
         Compute and log aggregate welfare metrics for the entire economy
         """
@@ -387,7 +386,6 @@ class KiyotakiWrightScenario(BaseScenario):
         total_exploitability = 0.0
 
         for agent in world.agents:
-            agent = cast(KiyotakiAgent, agent)
             metrics = self.compute_welfare_metrics(agent, world)
             total_welfare_loss += metrics["welfare_loss_pct"]
             total_exploitability += metrics["exploitability_pct"]
@@ -398,7 +396,9 @@ class KiyotakiWrightScenario(BaseScenario):
             "avg_exploitability_pct": total_exploitability / n_agents,
         }
 
-    def visualize_metrics(self, world: World) -> go.Figure:
+    def visualize_metrics(
+        self, agents: list[KiyotakiAgent], world: TradingNetwork
+    ) -> go.Figure:
         """Visualize the current state of the economy"""
         import plotly.graph_objects as go  # type: ignore[import-untyped]
         from plotly.subplots import make_subplots  # type: ignore[import-untyped]
@@ -411,8 +411,7 @@ class KiyotakiWrightScenario(BaseScenario):
             (3, 3), device=world.device
         )  # [agent_type, holding]
         for agent in world.agents:
-            a = cast(KiyotakiAgent, agent)
-            holdings_by_type[a.type, a.holding] += 1
+            holdings_by_type[agent.type, agent.holding] += 1
 
         # Create subplots
         fig = make_subplots(
@@ -453,9 +452,8 @@ class KiyotakiWrightScenario(BaseScenario):
         import numpy as np
 
         # Create circular layout
-        for i, agent in enumerate(world.agents):
-            agent = cast(KiyotakiAgent, agent)
-            angle = (2 * np.pi * i) / len(world.agents)
+        for i in range(len(agents)):
+            angle = (2 * np.pi * i) / len(agents)
             x = np.cos(angle)
             y = np.sin(angle)
             node_x.append(x)
@@ -463,11 +461,9 @@ class KiyotakiWrightScenario(BaseScenario):
 
         # Add edges for recent trades
         for i, agent in enumerate(world.agents):
-            a = cast(KiyotakiAgent, agent)
-            if a.just_traded:
+            if agent.just_traded:
                 for j, other in enumerate(world.agents):
-                    o = cast(KiyotakiAgent, other)
-                    if o.just_traded and i < j:
+                    if other.just_traded and i < j:
                         edge_x.extend([node_x[i], node_x[j], None])
                         edge_y.extend([node_y[i], node_y[j], None])
 
@@ -487,7 +483,6 @@ class KiyotakiWrightScenario(BaseScenario):
 
         # Add nodes
         node_colors = ["red", "green", "blue"]
-        agents = cast(list[KiyotakiAgent], world.agents)
         fig.add_trace(
             go.Scatter(
                 x=node_x,
@@ -552,7 +547,7 @@ class KiyotakiWrightScenario(BaseScenario):
 
         return fig
 
-    def visualize_state(self, world: World) -> None:
+    def visualize_state(self, world: TradingNetwork) -> None:
         """Visualize the current state using matplotlib"""
         import matplotlib.pyplot as plt
         import numpy as np
@@ -563,7 +558,6 @@ class KiyotakiWrightScenario(BaseScenario):
         # 1. Holdings Distribution Heatmap
         holdings_by_type = torch.zeros((3, 3), device=world.device)
         for agent in world.agents:
-            agent = cast(KiyotakiAgent, agent)
             holdings_by_type[agent.type, agent.holding] += 1
 
         _im = ax1.imshow(holdings_by_type.cpu().numpy(), cmap="viridis")
@@ -586,7 +580,6 @@ class KiyotakiWrightScenario(BaseScenario):
         # 2. Agent Network (simplified)
         ax2.set_title("Agent Network")
         for agent in world.agents:
-            agent = cast(KiyotakiAgent, agent)
             if agent.just_traded:
                 ax2.plot(agent.type, agent.holding, "ro")
             else:

@@ -5,10 +5,10 @@ from typing import cast
 
 def inherit_signature_from[T, **P](
     original: Callable[P, T],
-) -> Callable[[Callable], Callable[P, T]]:
+) -> Callable[[Callable[..., T]], Callable[P, T]]:
     """Set the signature of one function to the signature of another."""
 
-    def wrapper(f: Callable) -> Callable[P, T]:
+    def wrapper(f: Callable[..., T]) -> Callable[P, T]:
         return cast(Callable[P, T], update_wrapper(f, original))
 
     return wrapper

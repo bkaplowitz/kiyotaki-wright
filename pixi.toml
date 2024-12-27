@@ -30,6 +30,8 @@ pytest-sugar = ">=1.0.0,<2"
 pytest-cov = ">=6.0.0,<7"
 mypy = ">=1.13.0,<2"
 matplotlib = ">=3.10.0,<4"
+types-tqdm = ">=4.67.0.20241221,<5"
+gymnasium = ">=1.0.0,<2"
 
 
 [pypi-dependencies]
