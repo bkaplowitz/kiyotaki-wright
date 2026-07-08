@@ -1,7 +1,14 @@
 import numpy as np
+import pytest
 from kw.economies import get_economy
 from kw.distributions import reciprocation, invariant
-from kw.bellman import rvi_solve, greedy_policy, policy_eval, rvi_solve_subjective
+from kw.bellman import (
+    rvi_solve,
+    greedy_policy,
+    policy_eval,
+    policy_eval_subjective,
+    rvi_solve_subjective,
+)
 
 def test_no_trade_gain_is_minus_storage():
     e = get_economy("A1")
@@ -49,3 +56,34 @@ def test_subjective_no_reciprocation_means_no_trade_value():
     q = np.zeros((3, 3))
     g, V, W = rvi_solve_subjective(e, 0, m, q)
     assert np.isclose(g, -e.s[e.f[0]], atol=1e-8)     # skeptical beliefs → autarky value
+
+def test_policy_eval_rejects_beta_on_gamma_infeasible_fiat_row():
+    e = get_economy("C")
+    agg = np.full(4, 0.25)
+    Q = np.zeros((4, 4))
+    alpha_i = np.zeros((4, 4))
+    for i in range(e.n_types):
+        beta_i = np.zeros(4)
+        beta_i[e.fiat_idx] = 1.0
+        with pytest.raises(ValueError):
+            policy_eval(e, i, alpha_i, beta_i, agg, Q)
+
+def test_policy_eval_rejects_alpha_on_lambda_infeasible_diagonal():
+    e = get_economy("A1")
+    agg = np.full(3, 1 / 3)
+    Q = np.zeros((3, 3))
+    beta_i = np.zeros(3)
+    alpha_i = np.zeros((3, 3))
+    alpha_i[0, 0] = 1.0
+    with pytest.raises(ValueError):
+        policy_eval(e, 0, alpha_i, beta_i, agg, Q)
+
+def test_policy_eval_subjective_no_trade_gain_is_minus_storage():
+    e = get_economy("A1")
+    m_i = np.full(3, 1 / 3)
+    q_i = np.zeros((3, 3))
+    alpha_i = np.zeros((3, 3))
+    beta_i = np.zeros(3)
+    beta_i[e.consume_idx[0]] = 1.0
+    g, V = policy_eval_subjective(e, 0, alpha_i, beta_i, m_i, q_i)
+    assert np.isclose(g, -e.s[e.f[0]], atol=1e-9)     # f(0)=1 → g = -s[1] = -1.0

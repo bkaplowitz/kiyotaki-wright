@@ -16,7 +16,11 @@ recurrent classes with gain != g(k_ref) drift linearly forever, but D
 converges to the vector of per-state optimal gains; g = D[k_ref] is then the
 exact gain at the reference good, which is the scalar the paper's per-type
 gain means. Multichain inputs are legitimate (paper fn. 4; architecture
-§5.4), so this exit returns normally rather than failing.
+§5.4), so this exit returns normally rather than failing. For unichain
+inputs the same D-exit is a trade-off, not a free win: its gain error is
+bounded by roughly tol/(1-rho) for slow-mixing chains (rho the mixing rate),
+and inputs that mix extremely slowly fail loud at max_iter rather than
+silently returning a wrong gain.
 """
 
 from collections.abc import Callable
@@ -77,6 +81,29 @@ def _avg_trade_backup(
     return backup
 
 
+def _check_policy_feasible(
+    econ: Economy, i: int, alpha_i: np.ndarray, beta_i: np.ndarray, label: str
+) -> None:
+    """Reject fixed policies that assign positive probability to infeasible actions.
+
+    _avg_cons_backup zeroes the -inf reward at gamma-infeasible holdings to
+    avoid NaN in the sigma-average; a caller passing beta_i > 0 there would
+    silently get a wrong (not a loud) evaluation, so it is rejected here.
+    """
+    bad_beta = (beta_i > 0) & ~econ.gamma_feasible[i]
+    if np.any(bad_beta):
+        holdings = np.nonzero(bad_beta)[0].tolist()
+        raise ValueError(
+            f"{label}: beta_i > 0 at gamma-infeasible holdings for type {i}: {holdings}"
+        )
+    bad_alpha = (alpha_i > 0) & ~econ.lambda_feasible[i]
+    if np.any(bad_alpha):
+        pairs = [tuple(p) for p in np.argwhere(bad_alpha).tolist()]
+        raise ValueError(
+            f"{label}: alpha_i > 0 at lambda-infeasible (k,j) pairs for type {i}: {pairs}"
+        )
+
+
 def _run_rvi(
     econ: Economy,
     i: int,
@@ -90,6 +117,7 @@ def _run_rvi(
     V = np.zeros(econ.n_goods, dtype=np.float64)
     g = 0.0
     D_prev = np.full(econ.n_goods, np.inf)
+    residual = np.inf
     for _ in range(max_iter):
         W = cons_backup(V)
         TV = trade_backup(W)
@@ -99,13 +127,14 @@ def _run_rvi(
         unichain_done = np.max(np.abs(V_new - V)) <= tol and abs(g_new - g) <= tol
         # Multichain exit: D stabilizes state-wise even though V drifts in
         # recurrent classes whose gain differs from g(kref) (module docstring).
-        multichain_done = np.max(np.abs(D - D_prev)) <= tol
+        residual = np.max(np.abs(D - D_prev))
+        multichain_done = residual <= tol
         if unichain_done or multichain_done:
             return g_new, V_new, cons_backup(V_new)
         V, g, D_prev = V_new, g_new, D
     raise RuntimeError(
         f"{label}: RVI did not converge within {max_iter} iterations "
-        f"(residual={np.max(np.abs(D - D_prev)):.3e} > tol={tol:.3e})"
+        f"(residual={residual:.3e} > tol={tol:.3e})"
     )
 
 
@@ -183,6 +212,7 @@ def policy_eval(
     max_iter: int = 200_000,
 ) -> tuple[float, np.ndarray]:
     """Gain and bias of fixed (alpha_i, beta_i): RVI on the sigma-averaged operator."""
+    _check_policy_feasible(econ, i, alpha_i, beta_i, "policy_eval")
     g, V, _ = _run_rvi(
         econ,
         i,
@@ -206,6 +236,7 @@ def policy_eval_subjective(
     max_iter: int = 200_000,
 ) -> tuple[float, np.ndarray]:
     """Fixed-policy gain and bias under type i's own beliefs (m_i, q_i)."""
+    _check_policy_feasible(econ, i, alpha_i, beta_i, "policy_eval_subjective")
     g, V, _ = _run_rvi(
         econ,
         i,
