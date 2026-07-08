@@ -135,15 +135,16 @@ these a population of model-based learners actually reaches (§7).
 @dataclass(frozen=True)
 class Economy:
     name: str
-    goods: tuple[int, ...]          # G; includes 0 for fiat in C
+    n_goods: int                    # |G|; includes fiat good 0 in C
     n_types: int                    # |I|
     nu: np.ndarray                  # (|I|,) population shares
-    f: np.ndarray                   # (|I|,) production map, f[i] in G
+    f: np.ndarray                   # (|I|,) production map, 0-based good index
+    consume_idx: np.ndarray         # (|I|,) consumption-good index per type
     s: np.ndarray                   # (|G|,) storage costs indexed by good
     ubar: np.ndarray                # (|I|,) consumption utilities
     gamma_feasible: np.ndarray      # (|I|,|G|) bool: 1 ∈ Γ_i(h)?
     lambda_feasible: np.ndarray     # (|I|,|G|,|G|) bool: 1 ∈ Λ_i(k,j)?
-    fiat_good: int | None           # 0 in C, else None
+    fiat_idx: int | None            # 0 in C, else None
     M0: float | None                # aggregate fiat share (C: 0.32)
 ```
 
@@ -159,8 +160,9 @@ Registry (paper §5) — types are 1-indexed in the paper, 0-indexed in code:
 
 ### 5.2 Environment mechanics (`environment.py`)
 
-Pure functions of the period structure: reward `r_i(h, γ) = γ(ū_i·1{h=i} −
-s(f(i))) + (1−γ)(−s(h))` (R); next-holding map `c_i(h, γ) = f(i) if γ else h`;
+Pure functions of the period structure: reward `r_i(h, γ) = γ(ū_i·1{h =
+consume_idx[i]} − s(f(i))) + (1−γ)(−s(h))` (R); next-holding map
+`c_i(h, γ) = f(i) if γ else h`;
 trade resolution `χ = 1{k≠j and both offer}`. Policies are arrays
 `alpha[i,k,j] ∈ [0,1]`, `beta[i,h] ∈ [0,1]` with feasibility masks applied
 (β_i(0)=0 in C).
