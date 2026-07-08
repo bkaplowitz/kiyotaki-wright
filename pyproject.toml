@@ -1,0 +1,31 @@
+[project]
+name = "kw"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Brandon Kaplowitz", email = "bkaplowitzbk@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "joblib>=1.5.3",
+    "matplotlib>=3.11.0",
+    "numpy>=2.5.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.27,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+]
+
+[tool.pytest.ini_options]
+markers = ["slow: >5s integration runs"]
+addopts = "-m 'not slow'"
+
+[tool.ruff]
+line-length = 100
