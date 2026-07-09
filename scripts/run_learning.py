@@ -16,16 +16,12 @@ n_min=2, patience=2 -- the same DRY config the test suite uses) and runs the
 Learner registry: `--learner muzero-emp` is the paper's fully-empirical
 MuZero variant (all three ablation flags off); `--learner muzero-known` is
 the known-environment variant (all three flags on -- architecture.md
-§7.2/§12.12). Both route through `MuZeroLearner`; muzero-known currently
-raises NotImplementedError because `planner.py` has no RulesBackend yet
-(arrives with Task 14) -- this is expected and reported as a clean CLI
-error, not swallowed. `--learner q` routes through
-`kw.extensions.qlearning.QLearner` (Task 15, ext §4's differential
+§7.2/§12.12). Both route through `MuZeroLearner`. `--learner q` routes
+through `kw.extensions.qlearning.QLearner` (Task 15, ext §4's differential
 average-reward TD baseline) at its default hyperparameters (q_lr=0.1,
-eta=0.5, dyna="none"). `dyna-emp`/`dyna-rules` remain registry stubs
-(Task 16's Dyna planning backups); each raises a clean NotImplementedError.
-Landing that task means replacing exactly one registry entry apiece -- the
-muzero-known entry needs no change at all once RulesBackend exists.
+eta=0.5, dyna="none"). `--learner dyna-emp`/`dyna-rules` route through the
+same `QLearner` with `dyna="emp"`/`dyna="rules"` (Task 16, ext §4's Dyna-Q
+planning backups on top of the same TD baseline).
 
 Per-iteration diagnostics: `RunResult.trace` (simulate.py) carries no policy
 snapshots by design (the fairness contract forbids modifying simulate.py to
@@ -169,9 +165,9 @@ def _q_factory(econ, cfg, rng, flags, args) -> QLearner:
     return QLearner(econ, cfg, rng, per_agent=args.per_agent)
 
 
-def _stub_factory(task: str):
-    def factory(econ, cfg, rng, flags, args):
-        raise NotImplementedError(f"--learner {args.learner!r} is not implemented until {task}")
+def _dyna_factory(dyna: str):
+    def factory(econ, cfg, rng, flags, args) -> QLearner:
+        return QLearner(econ, cfg, rng, dyna=dyna, per_agent=args.per_agent)
 
     return factory
 
@@ -180,8 +176,8 @@ LEARNER_REGISTRY = {
     "muzero-emp": _muzero_factory,
     "muzero-known": _muzero_factory,
     "q": _q_factory,
-    "dyna-emp": _stub_factory("Task 16"),
-    "dyna-rules": _stub_factory("Task 16"),
+    "dyna-emp": _dyna_factory("emp"),
+    "dyna-rules": _dyna_factory("rules"),
 }
 
 

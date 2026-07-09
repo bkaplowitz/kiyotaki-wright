@@ -51,19 +51,45 @@ bootstrap, one level down.
 `per_agent=True` is accepted but raises `NotImplementedError`, matching
 `MuZeroLearner`: routing per-agent banks needs an agent id that the
 `trade_action`/`cons_action` protocol does not carry (deferred, per the
-architecture's per-agent extension). `dyna != "none"` also raises
-`NotImplementedError` naming Task 16, which is where the Dyna planning
-backups (`extensions/architecture.md` §4's K=20-backup variants) belong.
+architecture's per-agent extension).
+
+`dyna="emp"|"rules"` (ext §4) layers Dyna-Q planning on top of the real-
+experience TD updates above, unchanged: the learner additionally owns a
+population-shared `ModelBank` (`n_banks=1`, mirroring `MuZeroLearner`), fed
+through the identical observation pathway (`observe_meeting`,
+`observe_trade`, `observe_cons`); `dyna="rules"` additionally feeds
+`observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))` for every true
+offer (`rec.k != rec.j`) -- the same opposite-direction acceptance evidence
+`MuZeroLearner`'s `known_rules` branch feeds; `dyna="emp"` never does
+(fidelity 12.10). After every real TD completes (a feasible trade update in
+`observe_trade`, or a completed pending consumption update in
+`observe_meeting_agent`), `dyna_k` expected planning backups run against a
+uniformly sampled visited nontrivial root (trade roots `k != j`; cons roots
+`(i, h)`; same-good trade roots are never visited, hence never sampled),
+drawn from `self.rng`. Each backup replaces the bootstrap term of the
+corresponding real-experience update with its full expectation under the
+current model (`EmpiricalBackend`/`RulesBackend`, `kw.planner`) in place of
+one observed transition, at step size `q_lr`, and writes only the Q table
+-- `gbar` moves on real consumption TDs alone, `eta` plays no role in
+planning. The cons-root backup mirrors `observe_meeting_agent`'s same-good
+fallback one level up: the simulated next meeting's offered good `j` is
+drawn from `m_hat_i`, and whenever `j` equals the simulated post-
+consumption holding `h''`, the backup substitutes `max_gamma QC[i, h'', :]`
+for `max_lambda QT[i, h'', j, :]`, since that diagonal is the permanent
+`-inf` infeasibility mask, not an unvisited zero.
 
 RNG discipline (§12.2): action sampling draws from the per-call `rng`
 argument threaded by `simulate.run_learning`. The constructor `rng` is
-stored but reserved, matching `MuZeroLearner` -- it seeds nothing here.
+stored but reserved for action sampling, matching `MuZeroLearner` -- Dyna's
+planning-root sampling is the one place this learner draws from it directly.
 """
 
 import numpy as np
 
 from kw.economies import Economy
+from kw.empirical_model import ModelBank
 from kw.learners.base import ConsRecord, LearnerConfig, TradeRecord
+from kw.planner import EmpiricalBackend, RulesBackend
 
 
 class QLearner:
@@ -84,8 +110,8 @@ class QLearner:
             raise NotImplementedError(
                 "per_agent banks need an agent id, absent from the trade/cons action protocol"
             )
-        if dyna != "none":
-            raise NotImplementedError(f"dyna={dyna!r} planning backups are Task 16")
+        if dyna not in ("none", "emp", "rules"):
+            raise ValueError(f"dyna={dyna!r} must be one of 'none', 'emp', 'rules'")
         self.econ = econ
         self.cfg = cfg
         self.rng = rng
@@ -103,39 +129,69 @@ class QLearner:
         self.QC[..., 1] = np.where(econ.gamma_feasible, 0.0, -np.inf)
         self.gbar = np.zeros(n_types, dtype=np.float64)
 
+        self.bank = None
+        self.model = None
+        self.backend = None
+        if dyna != "none":
+            self.bank = ModelBank(econ, n_banks=1, kappa0=cfg.kappa0)
+            self.model = self.bank[0]
+            self.backend = (
+                RulesBackend(econ, self.model) if dyna == "rules" else EmpiricalBackend(self.model)
+            )
+
         self._pending: dict[int, ConsRecord] = {}
         self._trade_visited: set[tuple[int, int, int]] = set()
         self._cons_visited: set[tuple[int, int]] = set()
+        self._dyna_trade_roots: list[tuple[int, int, int]] = []
+        self._dyna_cons_roots: list[tuple[int, int]] = []
+        self._dyna_trade_seen: set[tuple[int, int, int]] = set()
+        self._dyna_cons_seen: set[tuple[int, int]] = set()
         self._alpha_prev, self._beta_prev = self._greedy_alpha_beta()
 
     def observe_meeting(self, i: int, j_good: int) -> None:
-        """No-op: this action protocol carries no agent id, and this learner's
-        pending-transition bookkeeping is driven by `observe_meeting_agent`
-        instead (see the module docstring)."""
+        """Feeds `m_hat` for `dyna != "none"`; otherwise a no-op, since this
+        learner's pending-transition bookkeeping is driven by
+        `observe_meeting_agent` instead (see the module docstring)."""
+        if self.dyna != "none":
+            self.model.observe_meeting(i, j_good)
 
     def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int:
         if k == j:
             return 0
         self._trade_visited.add((i, k, j))
+        if self.dyna != "none" and (i, k, j) not in self._dyna_trade_seen:
+            self._dyna_trade_seen.add((i, k, j))
+            self._dyna_trade_roots.append((i, k, j))
         if rng.random() < self.eps:
             return int(rng.integers(0, 2))
         return int(self.QT[i, k, j, 1] > self.QT[i, k, j, 0])
 
     def cons_action(self, i: int, h: int, rng: np.random.Generator) -> int:
         self._cons_visited.add((i, h))
+        if self.dyna != "none" and (i, h) not in self._dyna_cons_seen:
+            self._dyna_cons_seen.add((i, h))
+            self._dyna_cons_roots.append((i, h))
         feasible1 = bool(self.econ.gamma_feasible[i, h])
         if rng.random() < self.eps:
             return int(rng.integers(0, 2)) if feasible1 else 0
         return int(feasible1 and self.QC[i, h, 1] > self.QC[i, h, 0])
 
     def observe_trade(self, rec: TradeRecord) -> None:
+        if self.dyna != "none":
+            self.model.observe_trade(rec)
+            if self.dyna == "rules" and rec.k != rec.j:
+                self.model.observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))
         if not self.econ.lambda_feasible[rec.i, rec.k, rec.j]:
             return
         target = float(np.max(self.QC[rec.i, rec.h_next, :]))
         delta_t = target - self.QT[rec.i, rec.k, rec.j, rec.lam]
         self.QT[rec.i, rec.k, rec.j, rec.lam] += self.q_lr * delta_t
+        if self.dyna != "none":
+            self._plan()
 
     def observe_cons(self, rec: ConsRecord) -> None:
+        if self.dyna != "none":
+            self.model.observe_cons(rec)
         self._pending[rec.agent] = rec
 
     def observe_meeting_agent(self, agent: int, i: int, k: int, j_good: int) -> None:
@@ -149,6 +205,53 @@ class QLearner:
         delta_c = rec.r - self.gbar[rec.i] + target - self.QC[rec.i, rec.h, rec.gamma]
         self.QC[rec.i, rec.h, rec.gamma] += self.q_lr * delta_c
         self.gbar[rec.i] += self.eta * self.q_lr * delta_c
+        if self.dyna != "none":
+            self._plan()
+
+    def _plan(self) -> None:
+        """`dyna_k` expected planning backups (ext §4) at roots uniformly
+        sampled, with replacement, from every nontrivial root visited so far
+        by real experience (`_dyna_trade_roots`/`_dyna_cons_roots`, populated
+        in `trade_action`/`cons_action`, never cleared). No-op until at least
+        one such root has been visited."""
+        n_t = len(self._dyna_trade_roots)
+        n_c = len(self._dyna_cons_roots)
+        total = n_t + n_c
+        if total == 0:
+            return
+        for _ in range(self.dyna_k):
+            idx = int(self.rng.integers(0, total))
+            if idx < n_t:
+                self._backup_trade_root(*self._dyna_trade_roots[idx])
+            else:
+                self._backup_cons_root(*self._dyna_cons_roots[idx - n_t])
+
+    def _backup_trade_root(self, i: int, k: int, j: int) -> None:
+        r_t = self.backend.r_trade(i)[k, j, :]
+        p_t = self.backend.p_trade(i)[k, j, :, :]
+        qc_max = np.max(self.QC[i], axis=-1)
+        target = r_t + p_t @ qc_max
+        self.QT[i, k, j, :] = (1.0 - self.q_lr) * self.QT[i, k, j, :] + self.q_lr * target
+
+    def _backup_cons_root(self, i: int, h: int) -> None:
+        """The expected-form mirror of `observe_meeting_agent`'s same-good
+        fallback: the simulated next meeting offers good `j` ~ `m_hat_i`, and
+        whenever `j == h''` (the simulated post-consumption holding), the
+        backup substitutes `max_gamma QC[i, h'', :]` for the permanently
+        `-inf` `max_lambda QT[i, h'', j, :]` diagonal."""
+        m_i = self.backend.m(i)
+        qt_max = np.max(self.QT[i], axis=-1)
+        qc_max = np.max(self.QC[i], axis=-1)
+        val = qt_max.copy()
+        np.fill_diagonal(val, qc_max)
+        eff = val @ m_i
+        r_c = self.backend.r_cons(i)[h, :]
+        p_c = self.backend.p_cons(i)[h, :, :]
+        target = r_c - self.gbar[i] + p_c @ eff
+        new_row = (1.0 - self.q_lr) * self.QC[i, h, :] + self.q_lr * target
+        self.QC[i, h, 0] = new_row[0]
+        if self.econ.gamma_feasible[i, h]:
+            self.QC[i, h, 1] = new_row[1]
 
     def _greedy_alpha_beta(self) -> tuple[np.ndarray, np.ndarray]:
         econ = self.econ
