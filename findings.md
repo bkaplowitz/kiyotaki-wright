@@ -261,3 +261,221 @@ experiments report -- with the caveat that D's endpoint is a valid SCE but
 not Fig. 10's exact point (policy-level gap on T2, above). The A2 variant
 (paper fn. 10, deviation gain ~21.4) was not run -- optional in the brief
 and skipped.
+
+## H3 empirical learner
+
+**H3: `MuZeroLearner` (Algorithms 3-4, fully empirical variant -- all three
+ablation flags off) reproduces the paper's Table 2 per-economy
+best-response gains at Table-1 scale, single seed, order-of-magnitude.**
+
+Reproduce with:
+
+```bash
+for econ in A1 A2 B C D; do
+  uv run python scripts/run_learning.py --economy $econ --learner muzero-emp --seed 0 \
+    --out runs/$econ/muzero-emp/0
+done
+```
+
+All five runs use `LearnerConfig()` Table-1 defaults (`n_agents=1800,
+rounds=35, n_iters_max=180, n_sims=32, ...`), seed 0, and stop via the (D1)
+rule (`simulate.run_learning`, not this script). `br_gain`/`stationarity`
+are computed twice: once per iteration from the raw training-table
+snapshot (`kw.diagnostics.br_gain(econ, alpha_n, beta_n, mu=None)`, i.e.
+against the invariant distribution *induced by that iteration's own
+policy*) for the trace, and once at the end from the extracted deployment
+policy (`alpha_star`, `beta_star`, `mu_star`) -- the deployment numbers are
+what the table below and architecture.md §15 compare against. Wall clock:
+~55-60s per economy on a single core (`elapsed_seconds` in each
+`trace.json`); the post-hoc diagnostics loop (up to 108 `invariant()` +
+`br_gain()` calls) adds no measurable overhead because every training
+snapshot is eps-floor-ergodic.
+
+| econ | n_iters | converged (D1) | deployment br_gain (max over types) | paper target | verdict | deployment stationarity | paper target |
+|---|---|---|---|---|---|---|---|
+| A1 | 108 | True | 5.05e-11 | 1.50e-12 | MATCH | 0.0 | -- |
+| A2 | 108 | True | 6.18e-12 | 21.3 | MISMATCH | 0.0163 | -- |
+| B  | 108 | True | 0.0 | 0 | MATCH | 0.0106 | -- |
+| C  | 108 | True | 0.594 | 12.8 | MISMATCH | 0.0223 | 0.130 |
+| D  | 108 | True | 0.626 | 1.71 | MISMATCH | 0.0235 | 0.173 |
+
+`converged` is the (D1) Δ̄-stabilization predicate, re-derived from the
+saved `trace["delta"]` tail -- it is **not** a Nash/`br_gain` check. All
+five runs report `converged=True` at the identical `n_iters=108`; see
+"Why n_iters=108 everywhere" below before reading the per-economy verdicts,
+since it is the load-bearing fact behind three of the four mismatches.
+
+### A1 -- MATCH (near-exact Nash)
+
+`br_gain = 5.05e-11` (paper `1.50e-12`, both machine-precision zero at this
+scale; identical to the Task-12 slow-test value at the same seed, since
+that test's `test_a1_full_run_reaches_nash` runs the identical
+`(econ, cfg, seed=0)` triple). Deployment aggregate holdings
+`[0.5000, 0.3333, 0.1667]` vs architecture.md §15's qualitative target
+"good 1 ≈ 0.49, good 3 ≈ 0.18" -- MATCH.
+
+Per-type training-table trajectory (`trace["agg_holdings"]`, per-type
+distribution over held goods) shows the claimed autarky -> SNE transition,
+but on a different clock than architecture.md §15's "iterations 1-20
+nearer autarkic SCE, 21-107 nearer SNE": T2's holdings are
+`[0.073, 0.062, 0.865]` at n=1 (autarky-like, concentrated on its own
+production good, matching the H2 A1-autarky endpoint `T2 good3=1.00`) but
+already `[0.502, 0.005, 0.493]` by n=5 -- within sampling noise of the SNE
+mix `[0.5, 0, 0.5]` -- and stays there through n=108. **MISMATCH on
+timing**: our run reaches the SNE-like mix by iteration ~5, not ~21.
+Meanwhile the *training-table* `br_gain_series` drops 17.4 (n=1) -> 6.5
+(n=5) -> 1.90 (n=10) and then sits at exactly 1.9025 for n=10..108 without
+further movement -- the training tables (eps-floor-exploratory,
+zeta-mixed) reach their own local fixed point well before n=108 and stop
+moving; only the separate, near-greedy `deployment_policy()` pass (adj 8:
+deeper horizon, more sims, unclipped) closes the remaining gap to
+`5e-11`. This decoupling -- training-table convergence != deployment
+convergence != true Nash convergence -- recurs in C and D below.
+
+### A2 -- MISMATCH (learner found the speculative Nash; paper's Table 2 apparently did not)
+
+`br_gain = 6.18e-12` (paper target `21.3`) and deployment aggregate
+holdings `[0.5286, 0.2357, 0.2357]` -- this is an **exact match, to 4
+significant figures, of H1's own `runs/A2/nash-spec` speculative-branch
+Nash point** (`findings.md` H1 table: aggregate `[0.5286, 0.2357,
+0.2357]`, T1 `good2=0.7071/good3=0.2929`, etc.), not the fundamental
+branch A1 also reaches. In other words: starting from the same symmetric
+uniform initial policy used for every other economy (no misdirectional
+prompt, no speculative seeding), self-play at seed 0 discovers the
+coordination equilibrium that requires T1 to speculatively accept good 2
+for good 3 (`alpha[0,1,2] -> 1`) -- the branch architecture.md §15
+describes as unlikely to be found ("A2 condition flips between ū=100 and
+ū=500 (s₃−s₂=19 vs ū/6∈{16.7,83.3})"; our A2 is instantiated at
+`ubar=500.0` per `economies.py`, the side of the condition where
+speculation is the *rewarding* deviation, per H1's own A2-speculative run).
+
+The paper's Table 2 `br_gain≈21.3` for A2 is presumably what a self-play
+run that gets stuck on the *fundamental* branch (A1-like holdings) would
+score when evaluated at ubar=500, since the fundamental branch is not
+best-response once speculation pays 500-scale utility. Our seed-0 run
+simply lands in the better basin. This is a real, well-characterized
+mismatch, not a red flag: architecture.md §15's own closing line --
+"Multi-seed runs test the *claims*, not these exact single-seed numbers"
+-- anticipates exactly this kind of single-seed variance in a
+coordination-selection problem. §12 items 1 (argmax ties -> lowest action
+index) and 7 (multichain fix F_σ⋆ power-iterates from the terminal
+population distribution) both bear on which basin a run falls into; no
+tuning was applied to chase either outcome.
+
+### B -- MATCH (exact)
+
+`br_gain = 0.0` exactly (paper target `0`), aggregate holdings
+`[0.5286, 0.2357, 0.2357]` matching H1's `runs/B/nash-spec` speculative
+branch. B has no fundamental/speculative "condition flip" ambiguity
+(H1: both `nash-default` and `nash-spec` are genuine Nash points for B),
+so there is no analogous basin-selection risk here -- straightforward
+replication.
+
+### C -- MISMATCH (br_gain and stationarity both ~5-6x lower than paper)
+
+`br_gain = 0.594` (paper `12.8`), `stationarity = 0.0223` (paper `0.130`).
+Deployment aggregate `[0.300, 0.1375, 0.3494, 0.2131]` vs the H1 C-money
+SNE aggregate `[0.320, 0.2930, 0.2456, 0.1414]` -- visibly short of the
+true Nash point on goods 2-4, consistent with the nonzero `br_gain`. Same
+training/deployment decoupling as A1: the training-table `br_gain_series`
+sits at ~2.16-2.19 for the last 10 iterations (an order of magnitude
+*above* the deployment number), so the deployment PUCT pass (adj 8) is
+doing real work here but does not fully close the gap within its fixed
+budget (`h_dep=14, n_sims_dep=96, tau_dep=0.35`) the way it does for A1.
+
+**Broken fiat link, deployment (unclipped) policy** -- the three cells
+architecture.md §15 names (`α₂(0,2)=0.001, α₂(2,0)=1.000, α₃(1,2)≈0`,
+paper 1-indexed types, C's own goods already unshifted since
+`economies.py`'s C economy uses `s=[0.0,9.0,14.0,29.0]` over goods `{0
+(fiat), 1, 2, 3}` matching the paper 1:1): reading these as `alpha[i-1,
+k, j]` under the codebase's own `alpha[i,k,j]` = "type i holds k, meets
+counterparty holding j" convention (confirmed at `simulate.py:131-132`
+and architecture.md's `F_i(k,j)` formula, §6) gives `alpha[1,0,2]=0.9994`
+and `alpha[1,2,0]=0.00498` -- the **opposite** of the paper's stated
+`(0.001, 1.000)` pair. Reading them with `k` and `j` swapped instead
+(`alpha[1,2,0]` for `α₂(0,2)`, `alpha[1,0,2]` for `α₂(2,0)`) matches
+closely: `alpha[1,2,0]=0.00498 ≈ 0.001` and `alpha[1,0,2]=0.9994 ≈ 1.000`.
+`α₃(1,2)` is small under either reading (`alpha[2,1,2]=2.24e-6` or
+`alpha[2,2,1]=3.84e-3`), so it does not discriminate. Per controller
+resolution 5 (do not chase literal cell equality; record actual values,
+interpret "broken fiat link" as deployment-probability ~0), the numeric
+match is reported as-is rather than silently resolved: whichever argument
+order architecture.md's §15 prose intends, our C run reproduces the
+qualitative signature exactly -- for type T2, one direction between fiat
+(good 0) and good 2 is pinned near 1 and the reverse near 0
+(near-deterministic, asymmetric), not the symmetric ~0.5 a naive prior
+would give. **Training-table (eps-clipped) values for the same four cells**
+are `alpha_train_final[1,0,2]=0.446`, `[1,2,0]=0.927`, `[2,1,2]=0.107`,
+`[2,2,1]=0.849` -- compressed into `[eps_floor, 1-eps_floor] = [0.03,
+0.97]` as expected (adj 1/5) and less sharply polarized than the unclipped
+deployment read, but showing the same asymmetric ordering.
+
+### D -- MISMATCH (br_gain ~2.7x low, stationarity ~7x low)
+
+`br_gain = 0.626` (paper `1.71`) driven almost entirely by T2
+(`br_gaps_deployment = [0.0606, 0.6260, 5.3e-15, 0, 0]`); `stationarity =
+0.0235` (paper `0.173`). Deployment aggregate `[0.494, 0.247, 0.125,
+0.086, 0.048]` vs the H1 D-default SNE aggregate `[0.612, 0.077, 0.192,
+0.045, 0.074]` -- good-1 share short by ~0.12, again consistent with a
+run that has not fully closed on the true Nash point. Unlike C, D's
+*training-table* `br_gain_series` (last 10 iterations: 3.53-3.54) also sat
+roughly 5-6x above the deployment number and, distinctively, D's `delta`
+tail is not monotone the way A1/A2/B/C's are -- it drifts up slightly from
+`0.00049` (n=100) to `0.00066-0.00068` (n=104-108) after bottoming out
+around n=100-102, still comfortably under `delta_stop=0.003` so (D1) still
+fires at n=108, but indicating D's larger action space (5 types x 5 goods
+vs A1-C's 3-4) has not fully settled by the shared stopping point. Both
+diagnostics move the *same direction* relative to the paper (our run is
+closer to a fixed point than the paper reports, not farther), mirroring
+C's pattern rather than contradicting it.
+
+### Why n_iters=108 everywhere
+
+All five economies -- three of which have very different converged
+`br_gain` outcomes (near-zero for A1/A2/B, 0.59-0.63 for C/D) -- stop at
+the identical `n_iters=108` under (D1). This is explained by the ζ_n
+schedule, not coincidence: `zeta_n = max(zeta_min=0.01, zeta0=0.45 *
+zeta_decay=0.94^(n-1))` hits its floor `zeta_min` at n≈63 for *every*
+economy (the schedule has no economy-dependence), after which the
+per-iteration policy mixing step size is constant. From n≈63 onward, Δ̄_n
+(§12 item 9: computed post-clip on stored tables) reflects how much the
+*already-near-fixed-point* mixed table still moves at a constant mixing
+rate, which for all five economies apparently drops below `delta_stop=
+0.003` for a `patience=8` streak at almost the same iteration count. The
+practical upshot: `converged=True` at a shared `n_iters` certifies that
+the *training-table update dynamics* (ζ-mixing) have stabilized, not that
+the trained policy is near a stage-game Nash -- A1/B's training tables
+happen to stabilize near the true Nash, A2 got lucky into the speculative
+basin, but C/D's training tables stabilize at a point still 0.6-2.2 away
+from Nash by the `br_gain` measure, and (D1) does not distinguish these
+cases. This is a property of the paper's own stopping rule as
+implemented (§12 item 9), not a script defect; flagged here because it is
+the load-bearing mechanism behind every mismatch above except A2's.
+
+### H3 verdict
+
+**Partial match, three single-seed mismatches recorded, no tuning
+applied.** A1 and B reproduce paper Table 2 to the stated order of
+magnitude (both effectively exact zero). A2 mismatches in the "good"
+direction -- our seed lands on the paper's harder-to-find speculative
+Nash instead of the fundamental basin the paper's `br_gain≈21.3` implies
+-- consistent with architecture.md §15's own caveat that single-seed
+numbers test seed variance, not the underlying claim; §12 items 1 and 7
+are the plausible basin-selection levers, left untouched. C and D
+mismatch in the "not yet converged" direction (`br_gain` 0.59 vs 12.8,
+0.63 vs 1.71; `stationarity` 0.022 vs 0.130, 0.024 vs 0.173) -- both
+economies' training tables reach a ζ-mixing fixed point well short of the
+true Nash by n=108, and the deployment-time PUCT refinement pass (adj 8)
+narrows but does not close that gap; §12 item 9 (Δ̄ defined on post-clip
+stored tables, hence blind to the true residual) is the primary suspect,
+with items 3 (memoization) and 11 (deployment exploration floor) as
+secondary candidates. C's specific "broken fiat link" cells reproduce
+the paper's qualitative signature (asymmetric, near-deterministic T2
+policy between fiat and good 2) but only after swapping the `(k,j)`
+argument order against architecture.md §15's literal cell labels -- an
+interpretation gap in that cross-reference, not a code defect, reported
+with both readings rather than silently resolved. No hyperparameter was
+changed and no library code was edited to chase any of these three
+mismatches; multi-seed campaigns (Task 17) are the right next step to
+determine whether C/D's gap is a per-seed artifact of the shared,
+economy-independent (D1) stopping point or a systematic shortfall.
