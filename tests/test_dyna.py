@@ -118,6 +118,36 @@ def test_dyna_emp_never_feeds_offer():
     assert (lr.model._A_acc == 1.0).all()
 
 
+def test_planning_uses_updated_kernel_after_model_observation():
+    """Kernel-staleness guard: a planning backup that runs after a model
+    observation must see the model's *current* kernels, not a snapshot taken
+    before the observation. The first trigger backs root (0, 0, 1) up under a
+    deterministic kernel A (h'=0 / h'=1); the counts are then hand-flipped to
+    kernel B (h'=2 for both lam) and the identical trigger record is fed
+    again -- the second backup's target must be qc_max[2] = 5.0 for both lam.
+    A cache that survives `observe_trade`'s model feed would replay kernel A
+    (targets 2.0 / 9.0) and fail both closing asserts."""
+    e = get_economy("A1")
+    rng = np.random.default_rng(0)
+    lr = QLearner(e, LearnerConfig(), rng, dyna="emp", q_lr=0.5, dyna_k=1)
+
+    lr.trade_action(0, 0, 1, rng)  # seeds the dyna pool with exactly root (0, 0, 1)
+    lr.QC[0] = np.array([[1.0, 2.0], [3.0, 9.0], [5.0, 0.0]])  # qc_max = [2.0, 9.0, 5.0]
+    trigger = TradeRecord(agent=0, i=0, k=1, j=2, lam=0, h_next=1, r=0.0)
+
+    lr.model._N_T[0, 0, 1, 0, :] = [1000.0, 0.0, 0.0]  # kernel A, lam=0: h'=0
+    lr.model._N_T[0, 0, 1, 1, :] = [0.0, 1000.0, 0.0]  # kernel A, lam=1: h'=1
+    lr.observe_trade(trigger)
+    assert np.isclose(lr.QT[0, 0, 1, 0], 0.5 * 2.0)
+    assert np.isclose(lr.QT[0, 0, 1, 1], 0.5 * 9.0)
+
+    lr.model._N_T[0, 0, 1, 0, :] = [0.0, 0.0, 1000.0]  # kernel B, lam=0: h'=2
+    lr.model._N_T[0, 0, 1, 1, :] = [0.0, 0.0, 1000.0]  # kernel B, lam=1: h'=2
+    lr.observe_trade(trigger)
+    assert np.isclose(lr.QT[0, 0, 1, 0], 0.5 * (0.5 * 2.0) + 0.5 * 5.0)
+    assert np.isclose(lr.QT[0, 0, 1, 1], 0.5 * (0.5 * 9.0) + 0.5 * 5.0)
+
+
 @pytest.mark.parametrize("dyna", ["emp", "rules"])
 def test_dyna_dry_run_completes_all_econs(dyna):
     for name in ["A1", "C", "D"]:

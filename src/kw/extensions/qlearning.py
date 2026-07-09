@@ -71,7 +71,9 @@ corresponding real-experience update with its full expectation under the
 current model (`EmpiricalBackend`/`RulesBackend`, `kw.planner`) in place of
 one observed transition, at step size `q_lr`, and writes only the Q table
 -- `gbar` moves on real consumption TDs alone, `eta` plays no role in
-planning. The cons-root backup mirrors `observe_meeting_agent`'s same-good
+planning. Backend kernels are memoized per type between model observations
+(`_kernels`) -- pure value-preserving caching of the count renormalization,
+invalidated on every model feed, so backups always see the current model. The cons-root backup mirrors `observe_meeting_agent`'s same-good
 fallback one level up: the simulated next meeting's offered good `j` is
 drawn from `m_hat_i`, and whenever `j` equals the simulated post-
 consumption holding `h''`, the backup substitutes `max_gamma QC[i, h'', :]`
@@ -146,6 +148,9 @@ class QLearner:
         self._dyna_cons_roots: list[tuple[int, int]] = []
         self._dyna_trade_seen: set[tuple[int, int, int]] = set()
         self._dyna_cons_seen: set[tuple[int, int]] = set()
+        self._kernel_cache: dict[
+            int, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ] = {}
         self._alpha_prev, self._beta_prev = self._greedy_alpha_beta()
 
     def observe_meeting(self, i: int, j_good: int) -> None:
@@ -154,6 +159,7 @@ class QLearner:
         `observe_meeting_agent` instead (see the module docstring)."""
         if self.dyna != "none":
             self.model.observe_meeting(i, j_good)
+            self._kernel_cache.clear()
 
     def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int:
         if k == j:
@@ -181,6 +187,7 @@ class QLearner:
             self.model.observe_trade(rec)
             if self.dyna == "rules" and rec.k != rec.j:
                 self.model.observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))
+            self._kernel_cache.clear()
         if not self.econ.lambda_feasible[rec.i, rec.k, rec.j]:
             return
         target = float(np.max(self.QC[rec.i, rec.h_next, :]))
@@ -192,6 +199,7 @@ class QLearner:
     def observe_cons(self, rec: ConsRecord) -> None:
         if self.dyna != "none":
             self.model.observe_cons(rec)
+            self._kernel_cache.clear()
         self._pending[rec.agent] = rec
 
     def observe_meeting_agent(self, agent: int, i: int, k: int, j_good: int) -> None:
@@ -226,9 +234,27 @@ class QLearner:
             else:
                 self._backup_cons_root(*self._dyna_cons_roots[idx - n_t])
 
+    def _kernels(self, i: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Snapshot of the backend's per-type kernels `(m, p_trade, p_cons,
+        r_trade, r_cons)`, memoized between model observations: every model
+        feed (`observe_meeting`/`observe_trade`/`observe_cons`, including
+        `observe_offer` inside `observe_trade`) clears the cache, so the
+        `dyna_k` backups of one `_plan` burst renormalize the count tables
+        once per sampled type instead of once per backup. Value-preserving:
+        the backends return freshly built arrays or immutable precomputed
+        constants, never live views of the mutable counts, so a cache hit
+        replays byte-identical kernels."""
+        cached = self._kernel_cache.get(i)
+        if cached is None:
+            be = self.backend
+            cached = (be.m(i), be.p_trade(i), be.p_cons(i), be.r_trade(i), be.r_cons(i))
+            self._kernel_cache[i] = cached
+        return cached
+
     def _backup_trade_root(self, i: int, k: int, j: int) -> None:
-        r_t = self.backend.r_trade(i)[k, j, :]
-        p_t = self.backend.p_trade(i)[k, j, :, :]
+        _, p_trade_i, _, r_trade_i, _ = self._kernels(i)
+        r_t = r_trade_i[k, j, :]
+        p_t = p_trade_i[k, j, :, :]
         qc_max = np.max(self.QC[i], axis=-1)
         target = r_t + p_t @ qc_max
         self.QT[i, k, j, :] = (1.0 - self.q_lr) * self.QT[i, k, j, :] + self.q_lr * target
@@ -239,14 +265,14 @@ class QLearner:
         whenever `j == h''` (the simulated post-consumption holding), the
         backup substitutes `max_gamma QC[i, h'', :]` for the permanently
         `-inf` `max_lambda QT[i, h'', j, :]` diagonal."""
-        m_i = self.backend.m(i)
+        m_i, _, p_cons_i, _, r_cons_i = self._kernels(i)
         qt_max = np.max(self.QT[i], axis=-1)
         qc_max = np.max(self.QC[i], axis=-1)
         val = qt_max.copy()
         np.fill_diagonal(val, qc_max)
         eff = val @ m_i
-        r_c = self.backend.r_cons(i)[h, :]
-        p_c = self.backend.p_cons(i)[h, :, :]
+        r_c = r_cons_i[h, :]
+        p_c = p_cons_i[h, :, :]
         target = r_c - self.gbar[i] + p_c @ eff
         new_row = (1.0 - self.q_lr) * self.QC[i, h, :] + self.q_lr * target
         self.QC[i, h, 0] = new_row[0]
