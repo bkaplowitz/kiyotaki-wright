@@ -149,3 +149,104 @@ qualitatively only (correct branch, correct key speculative arc). D's
 per-type table has an apparent small transcription gap for T2/T3 (paper
 figures do not sum to 1.00) that does not affect the pinned aggregate
 good-1 share, which matches to 3 significant figures.
+
+## H2 SCE benchmarks
+
+**H2: misdirectional prompts drive Algorithm 2
+(`kw.sce_solver.solve_sce`) to restricted-information SCE that are
+subjectively optimal (`s <= 1e-9`) yet objectively poor (positive
+complete-information best-response gain, `kw.diagnostics.br_gain`).**
+
+Reproduce with:
+
+```bash
+uv run python scripts/compute_sce.py --economy A1 --prompt skeptical-autarky --out runs/A1/sce-autarky
+uv run python scripts/compute_sce.py --economy C --prompt skeptical-lowtrade --out runs/C/sce-lowtrade
+uv run python scripts/compute_sce.py --economy D --prompt type1-autarky --out runs/D/sce-t1autarky
+```
+
+The paper gives no per-economy prompt recipes for its SCE runs; the three
+`kw.prompts.sce_prompt` entries are our reconstructions, engineered so the
+solver reaches the paper's reported *endpoints* (page cites below are to
+those endpoints in `.superpowers/sdd/paper-check-sce.md`, not to any prompt
+construction). Paper values are read from `paper-check-sce.md`.
+
+| run | economy | prompt | converged | iters | final s | final b | final d | br_gain max |
+|---|---|---|---|---|---|---|---|---|
+| `runs/A1/sce-autarky`  | A1 | skeptical-autarky  | True | 1 | 0.0 | 0.0 | 0.0 | 19.90 |
+| `runs/C/sce-lowtrade`  | C  | skeptical-lowtrade | True | 1 | 0.0 | 7.7e-14 | 1.0e-15 | 33.33 |
+| `runs/D/sce-t1autarky` | D  | type1-autarky      | True | 2 | 1.4e-10 | 0.0 | 7.8e-16 | 80.00 |
+
+### A1, skeptical-autarky -> autarkic SCE (paper Fig. 2 right panel, p. 45)
+
+| type | our `mu` | paper | verdict |
+|---|---|---|---|
+| T1 | good2=1.00 | good2=1.00 | MATCH (exact) |
+| T2 | good3=1.00 | good3=1.00 | MATCH (exact) |
+| T3 | good1=1.00 | good1=1.00 | MATCH (exact) |
+
+Every type parks on its production good f(i) forever (test-pinned exactly
+in `test_a1_autarky_sce`). The skeptical beliefs `q_i = 0` are never
+contradicted because nobody offers, so no reciprocation rate is ever
+observed -- the paper's "pessimistic prompts are self-fulfilling"
+mechanism (p. 44-45). `br_gain = 19.9` (T2): under complete information T2
+could trade its stored good 3 (cost 20/period) once for good 1 (cost
+0.1/period) and park there, a deviation its own beliefs say is worthless.
+Verdict: **MATCH**.
+
+### C, skeptical-lowtrade -> low-trade fiat SCE (paper Fig. 8 bottom, p. 51-53)
+
+| type | our `mu` | paper | diff |
+|---|---|---|---|
+| T1 | good3=1.000 | good3=0.999 | 0.001 |
+| T2 | good0=0.960, good3=0.040 | good0=0.932 | 0.028 |
+| T3 | good1=1.000 | good1=0.973 | 0.027 |
+
+Aggregate `[0.3200, 0.3333, 0.3333, 0.0133]` vs paper's
+`(0.320, 0.335, 0.333, 0.012)` -- max diff 1.7e-3 (test-pinned at 5e-3 in
+`test_c_lowtrade_sce`). At this SCE trade has (essentially) stopped, so
+`F_sigma` is (near-)identity and *every* distribution is invariant: the
+frozen type-level split depends on the transient path taken before trade
+died out, which the paper does not publish. Our forward iteration from the
+f-endowment start lands within 0.03 of the paper's per-type values and
+within 2e-3 on the aggregate; the hidden-acceptor / suppressed-spender
+belief structure (the substance of the misdirection) is reproduced
+exactly. `br_gain = 33.3` (T1): T1 could objectively sell its stored good
+through the hidden acceptor arcs it believes are dead. Verdict:
+**CONSISTENT** (aggregate within rounding-scale 2e-3; type-level split
+transient-dependent as expected).
+
+### D, type1-autarky -> partial-autarky SCE (paper Fig. 10 bottom, p. 54-56)
+
+| type | our `mu` | paper | verdict |
+|---|---|---|---|
+| T1 | good3=1.00 | good3=1.00 | MATCH (exact) |
+| T2 | good1=1.00 | good1=0.72 | path-dependent split (see below) |
+| T3 | good1=1.00 | good1=1.00 | MATCH |
+| T4 | good1=1.00 | good1=1.00 | MATCH |
+| T5 | good1=1.00 | good1=1.00 | MATCH |
+
+Paper type 1 (code index 0) sits in autarky on its production good 3 with
+beliefs `q_1 = 0` while the other four types keep trading toward the
+commodity money good 1 -- the paper's "one skeptic in a working economy"
+endpoint. T2's paper value 0.72 leaves a 0.28 residual whose placement is
+recurrent-class/path dependent (paper p. 19: with T1 absent from trade,
+several absorbing splits exist); our run funnels all of T2's mass to good
+1, so we pin only the lower bound `mu[T2, good1] > 0.7`
+(`test_d_type1_autarky_sce`). `br_gain = 80.0` (T1): the working economy
+around the skeptic would objectively buy its good. Verdict: **MATCH** on
+T1/T3/T4/T5 (the values Fig. 10 prints as 1.00), **CONSISTENT** on T2
+(path-dependent residual).
+
+### H2 verdict
+
+**Confirmed.** All three misdirectional prompts converge to genuine SCE
+(subjective optimality gap `s <= 1e-9`, on-path belief error `b <= 1e-9`,
+distributional residual `d <= 1e-12`) that complete information reveals to
+be far from best responses: `br_gain` of 19.9 (A1), 33.3 (C), 80.0 (D) --
+each dominated by the misdirected type -- versus 0 at every H1 Nash point
+(`test_nash_is_sce` pins the converse: started from the A1 Nash
+equilibrium, `solve_sce` stays there with `br_gain <= 1e-6`). Subjectively
+optimal, objectively poor, exactly as the paper's §7 misdirection
+experiments report. The A2 variant (paper fn. 10, deviation gain ~21.4)
+was not run -- optional in the brief and skipped.
