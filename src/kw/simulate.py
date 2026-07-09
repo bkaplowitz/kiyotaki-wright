@@ -21,6 +21,15 @@ contributes only action selection, record ingestion, end-of-iteration
 bookkeeping (returning Delta-bar_n), and its deployment policy; it never
 touches matching, holdings bookkeeping, or the stopping rule.
 
+`_run_trade_round` also calls an optional `observe_meeting_agent(agent, i,
+k, j_good)` hook, for both agents of every meeting, before either agent's
+`trade_action`, guarded by `hasattr` so learners that don't define it (e.g.
+`MuZeroLearner`, whose meeting counts already come through
+`observe_meeting`) are unaffected. The Stage-2 differential Q-learning
+extension (Task 15) uses it to complete a consumption-stage TD update that
+had to be deferred at `observe_cons` time until the next meeting reveals
+the bootstrap good j'.
+
 RNG discipline (§12.2): `run_learning` builds exactly one
 `np.random.default_rng(seed)`, used both for the per-round matching
 permutation and passed through as the `rng` argument to every
@@ -127,6 +136,10 @@ def _run_trade_round(
 
         learner.observe_meeting(i_a, h_b)
         learner.observe_meeting(i_b, h_a)
+
+        if hasattr(learner, "observe_meeting_agent"):
+            learner.observe_meeting_agent(agent=a, i=i_a, k=h_a, j_good=h_b)
+            learner.observe_meeting_agent(agent=b, i=i_b, k=h_b, j_good=h_a)
 
         lam_a = learner.trade_action(i_a, h_a, h_b, rng)
         lam_b = learner.trade_action(i_b, h_b, h_a, rng)
