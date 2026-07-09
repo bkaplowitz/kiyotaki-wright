@@ -303,7 +303,9 @@ snapshot is eps-floor-ergodic.
 saved `trace["delta"]` tail -- it is **not** a Nash/`br_gain` check. All
 five runs report `converged=True` at the identical `n_iters=108`; see
 "Why n_iters=108 everywhere" below before reading the per-economy verdicts,
-since it is the load-bearing fact behind three of the four mismatches.
+since it is the load-bearing fact behind two of the three mismatches
+(C, D; A2's mismatch is a basin-selection story, not a stopping-rule
+artifact).
 
 ### A1 -- MATCH (near-exact Nash)
 
@@ -383,32 +385,51 @@ sits at ~2.16-2.19 for the last 10 iterations (an order of magnitude
 doing real work here but does not fully close the gap within its fixed
 budget (`h_dep=14, n_sims_dep=96, tau_dep=0.35`) the way it does for A1.
 
-**Broken fiat link, deployment (unclipped) policy** -- the three cells
-architecture.md §15 names (`α₂(0,2)=0.001, α₂(2,0)=1.000, α₃(1,2)≈0`,
-paper 1-indexed types, C's own goods already unshifted since
-`economies.py`'s C economy uses `s=[0.0,9.0,14.0,29.0]` over goods `{0
-(fiat), 1, 2, 3}` matching the paper 1:1): reading these as `alpha[i-1,
-k, j]` under the codebase's own `alpha[i,k,j]` = "type i holds k, meets
+**Fiat link, deployment (unclipped) policy -- NOT the paper's
+broken-link pathology.** architecture.md §15 names three cells for C's
+fiat-SNE qualitative signature (paper 1-indexed types): `α₂(0,2)=0.001,
+α₂(2,0)=1.000, α₃(1,2)≈0`. Reading these directly as `alpha[i-1,k,j]`
+under the codebase's own `alpha[i,k,j]` = "type i holds k, meets
 counterparty holding j" convention (confirmed at `simulate.py:131-132`
-and architecture.md's `F_i(k,j)` formula, §6) gives `alpha[1,0,2]=0.9994`
-and `alpha[1,2,0]=0.00498` -- the **opposite** of the paper's stated
-`(0.001, 1.000)` pair. Reading them with `k` and `j` swapped instead
-(`alpha[1,2,0]` for `α₂(0,2)`, `alpha[1,0,2]` for `α₂(2,0)`) matches
-closely: `alpha[1,2,0]=0.00498 ≈ 0.001` and `alpha[1,0,2]=0.9994 ≈ 1.000`.
-`α₃(1,2)` is small under either reading (`alpha[2,1,2]=2.24e-6` or
-`alpha[2,2,1]=3.84e-3`), so it does not discriminate. Per controller
-resolution 5 (do not chase literal cell equality; record actual values,
-interpret "broken fiat link" as deployment-probability ~0), the numeric
-match is reported as-is rather than silently resolved: whichever argument
-order architecture.md's §15 prose intends, our C run reproduces the
-qualitative signature exactly -- for type T2, one direction between fiat
-(good 0) and good 2 is pinned near 1 and the reverse near 0
-(near-deterministic, asymmetric), not the symmetric ~0.5 a naive prior
-would give. **Training-table (eps-clipped) values for the same four cells**
-are `alpha_train_final[1,0,2]=0.446`, `[1,2,0]=0.927`, `[2,1,2]=0.107`,
-`[2,2,1]=0.849` -- compressed into `[eps_floor, 1-eps_floor] = [0.03,
-0.97]` as expected (adj 1/5) and less sharply polarized than the unclipped
-deployment read, but showing the same asymmetric ordering.
+and architecture.md's `F_i(k,j)` formula, §6) and fixing the direction of
+"healthy" using `economies.py`'s `consume_idx=[1,2,3]` for C together
+with `prompts.py:97`'s `alpha[i, :, consume_idx[i]] = 1.0` prior (which
+establishes `j = consume_idx[i]` as "trade k away for my consumption
+good" -- i.e. `alpha[1,0,2]` is T2 buying its own consumption good, good
+2, with fiat: the textbook healthy monetary-trade direction) gives:
+
+| cell | code array | our value | paper | reading |
+|---|---|---|---|---|
+| α₂(0,2) | `alpha[1,0,2]` | 0.9994 | 0.001 | MISMATCH -- ours healthy, paper broken |
+| α₂(2,0) | `alpha[1,2,0]` | 0.00498 | 1.000 | MISMATCH -- ours healthy, paper broken |
+| α₃(1,2) | `alpha[2,1,2]` | 2.24e-6 | ~0 | MATCH |
+
+Our T2 (deployment) eagerly buys its consumption good with fiat
+(`alpha[1,0,2]≈1`) and refuses to give up a consumption good it already
+holds for fiat (`alpha[1,2,0]≈0`) -- the rational, healthy fiat-monetary
+policy, and the mirror image of the paper's stated `(0.001, 1.000)` pair,
+which describes a T2 that refuses to buy what it needs with money and
+immediately dumps what it needs for money. This is corroborated, not just
+asserted, by the aggregate diagnostics: a genuinely broken fiat link is a
+first-order welfare loss and should force a *large* `br_gain` (which is
+exactly why the paper's own C reports `br_gain=12.8`); our C
+`br_gain=0.594` is inconsistent with a broken link by that same logic.
+**Conclusion: C did not reproduce the paper's broken-fiat-link
+pathology -- it learned the healthy fiat-consumption policy instead,
+which is the same phenomenon, not a separate one, as its
+lower-than-paper `br_gain`.** (An earlier "argument-order swap" reading
+considered during analysis -- treating `α₂(0,2)` as `alpha[1,2,0]` and
+vice versa -- is discarded here: it would require `alpha[1,0,2]` to be
+simultaneously near-broken, `≈0.001`, and the run to be near-Nash,
+`br_gain=0.594`, which is self-contradictory by the welfare-loss argument
+above.) **Training-table (eps-clipped) values for the same three cells**
+are `alpha_train_final[1,0,2]=0.446`, `[1,2,0]=0.927`, `[2,1,2]=0.107` --
+compressed toward `[eps_floor, 1-eps_floor] = [0.03, 0.97]` as expected
+(adj 1/5) and, notably, `[1,2,0]=0.927` retains far more of the
+"wrong-direction" (dump-consumption-good-for-fiat) mass than the
+deployment policy shows -- the deployment PUCT pass (adj 8) is cleaning
+up training-table noise in the healthy direction, not degrading a
+paper-matching training table into a healthier deployment one.
 
 ### D -- MISMATCH (br_gain ~2.7x low, stationarity ~7x low)
 
@@ -455,27 +476,35 @@ the load-bearing mechanism behind every mismatch above except A2's.
 ### H3 verdict
 
 **Partial match, three single-seed mismatches recorded, no tuning
-applied.** A1 and B reproduce paper Table 2 to the stated order of
-magnitude (both effectively exact zero). A2 mismatches in the "good"
-direction -- our seed lands on the paper's harder-to-find speculative
-Nash instead of the fundamental basin the paper's `br_gain≈21.3` implies
--- consistent with architecture.md §15's own caveat that single-seed
-numbers test seed variance, not the underlying claim; §12 items 1 and 7
-are the plausible basin-selection levers, left untouched. C and D
-mismatch in the "not yet converged" direction (`br_gain` 0.59 vs 12.8,
-0.63 vs 1.71; `stationarity` 0.022 vs 0.130, 0.024 vs 0.173) -- both
-economies' training tables reach a ζ-mixing fixed point well short of the
-true Nash by n=108, and the deployment-time PUCT refinement pass (adj 8)
-narrows but does not close that gap; §12 item 9 (Δ̄ defined on post-clip
-stored tables, hence blind to the true residual) is the primary suspect,
-with items 3 (memoization) and 11 (deployment exploration floor) as
-secondary candidates. C's specific "broken fiat link" cells reproduce
-the paper's qualitative signature (asymmetric, near-deterministic T2
-policy between fiat and good 2) but only after swapping the `(k,j)`
-argument order against architecture.md §15's literal cell labels -- an
-interpretation gap in that cross-reference, not a code defect, reported
-with both readings rather than silently resolved. No hyperparameter was
-changed and no library code was edited to chase any of these three
-mismatches; multi-seed campaigns (Task 17) are the right next step to
-determine whether C/D's gap is a per-seed artifact of the shared,
-economy-independent (D1) stopping point or a systematic shortfall.
+applied -- and all three point the same direction.** A1 and B reproduce
+paper Table 2 to the stated order of magnitude (both effectively exact
+zero). The three mismatches are not four unrelated discrepancies: A2, C,
+and D all show our single seed converging *closer to a true stage-game
+Nash* than the paper's own reported Table 2 run. A2's `br_gain≈0` vs the
+paper's `≈21.3` is our seed landing on the harder-to-find speculative
+Nash instead of the fundamental basin -- consistent with architecture.md
+§15's own caveat that single-seed numbers test seed variance, not the
+underlying claim; §12 items 1 and 7 are the plausible basin-selection
+levers, left untouched. C and D show `br_gain` 0.59 vs 12.8 and 0.63 vs
+1.71 (`stationarity` 0.022 vs 0.130, 0.024 vs 0.173) -- both economies'
+training tables reach a ζ-mixing fixed point closer to, but still short
+of, the true Nash by n=108; the deployment-time PUCT refinement pass (adj
+8) narrows the gap further. C's specific fiat-link cells make this
+concrete rather than just aggregate: our run learned the *healthy*
+fiat-consumption policy (`alpha[1,0,2]≈1`, `alpha[1,2,0]≈0`) where the
+paper's Table 2 run reports the *broken* mirror-image policy
+(`α₂(0,2)=0.001, α₂(2,0)=1.000`) -- we did not reproduce that pathology,
+and the much-lower `br_gain` is the same phenomenon, not a separate
+discrepancy (a broken fiat link is a first-order welfare loss and would
+force a large `br_gain`, which is exactly why the paper's own C shows
+12.8). §12 item 9 (Δ̄ defined on post-clip stored tables, hence blind to
+the true residual against a stage-game Nash) is the primary suspect for
+why (D1) still certifies convergence before C/D fully close their
+remaining gap, with items 3 (memoization) and 11 (deployment exploration
+floor) as secondary candidates for why the deployment pass narrows but
+does not eliminate that gap. No hyperparameter was changed and no library
+code was edited to chase any of these three mismatches; multi-seed
+campaigns (Task 17) are the right next step to determine whether the
+paper's single-seed Table 2 runs (not ours) are the outliers here, and
+whether that same over-performance shows up consistently across seeds or
+is itself a lucky draw.
