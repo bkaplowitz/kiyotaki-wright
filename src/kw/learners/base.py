@@ -73,7 +73,9 @@ class Learner(Protocol):
     bookkeeping, and its deployment policy.
     """
 
-    def observe_meeting(self, i: int, j_good: int) -> None: ...
+    def observe_meeting(self, i: int, j_good: int) -> None:
+        """Own type `i` saw a matched partner holding `j_good`, before trade_action (Alg 3 l.5)."""
+        ...
 
     def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int: ...
 
