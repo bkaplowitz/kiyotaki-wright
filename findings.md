@@ -376,9 +376,12 @@ replication.
 ### C -- MISMATCH (br_gain and stationarity both ~5-6x lower than paper)
 
 `br_gain = 0.594` (paper `12.8`), `stationarity = 0.0223` (paper `0.130`).
-Deployment aggregate `[0.300, 0.1375, 0.3494, 0.2131]` vs the H1 C-money
-SNE aggregate `[0.320, 0.2930, 0.2456, 0.1414]` -- visibly short of the
-true Nash point on goods 2-4, consistent with the nonzero `br_gain`. Same
+Deployment aggregate `[0.3200, 0.3192, 0.1805, 0.1803]` vs the H1 C-money
+SNE aggregate `[0.320, 0.2930, 0.2456, 0.1414]` -- fiat matches the
+conserved `M0=0.32` exactly; the deployment run sits *above* the true
+Nash point on good 2 (0.3192 vs 0.2930) and good 4 (0.1803 vs 0.1414) and
+short only on good 3 (0.1805 vs 0.2456), consistent with the nonzero
+`br_gain`. Same
 training/deployment decoupling as A1: the training-table `br_gain_series`
 sits at ~2.16-2.19 for the last 10 iterations (an order of magnitude
 *above* the deployment number), so the deployment PUCT pass (adj 8) is
@@ -400,7 +403,7 @@ good" -- i.e. `alpha[1,0,2]` is T2 buying its own consumption good, good
 
 | cell | code array | our value | paper | reading |
 |---|---|---|---|---|
-| α₂(0,2) | `alpha[1,0,2]` | 0.9994 | 0.001 | MISMATCH -- ours healthy, paper broken |
+| α₂(0,2) | `alpha[1,0,2]` | 0.9993 | 0.001 | MISMATCH -- ours healthy, paper broken |
 | α₂(2,0) | `alpha[1,2,0]` | 0.00498 | 1.000 | MISMATCH -- ours healthy, paper broken |
 | α₃(1,2) | `alpha[2,1,2]` | 2.24e-6 | ~0 | MATCH |
 
@@ -435,9 +438,9 @@ paper-matching training table into a healthier deployment one.
 
 `br_gain = 0.626` (paper `1.71`) driven almost entirely by T2
 (`br_gaps_deployment = [0.0606, 0.6260, 5.3e-15, 0, 0]`); `stationarity =
-0.0235` (paper `0.173`). Deployment aggregate `[0.494, 0.247, 0.125,
-0.086, 0.048]` vs the H1 D-default SNE aggregate `[0.612, 0.077, 0.192,
-0.045, 0.074]` -- good-1 share short by ~0.12, again consistent with a
+0.0235` (paper `0.173`). Deployment aggregate `[0.4804, 0.1540, 0.1663,
+0.1085, 0.0908]` vs the H1 D-default SNE aggregate `[0.612, 0.077, 0.192,
+0.045, 0.074]` -- good-1 share short by ~0.13, again consistent with a
 run that has not fully closed on the true Nash point. Unlike C, D's
 *training-table* `br_gain_series` (last 10 iterations: 3.53-3.54) also sat
 roughly 5-6x above the deployment number and, distinctively, D's `delta`
@@ -488,11 +491,11 @@ underlying claim; §12 items 1 and 7 are the plausible basin-selection
 levers, left untouched. C and D show `br_gain` 0.59 vs 12.8 and 0.63 vs
 1.71 (`stationarity` 0.022 vs 0.130, 0.024 vs 0.173) -- both economies'
 training tables reach a ζ-mixing fixed point closer to, but still short
-of, the true Nash by n=108; the deployment-time PUCT refinement pass (adj
-8) narrows the gap further. C's specific fiat-link cells make this
-concrete rather than just aggregate: our run learned the *healthy*
-fiat-consumption policy (`alpha[1,0,2]≈1`, `alpha[1,2,0]≈0`) where the
-paper's Table 2 run reports the *broken* mirror-image policy
+of, the true Nash by n=108 on this seed; the deployment-time PUCT
+refinement pass (adj 8) narrows the gap further. C's specific fiat-link
+cells make this concrete rather than just aggregate: our run learned the
+*healthy* fiat-consumption policy (`alpha[1,0,2]≈1`, `alpha[1,2,0]≈0`)
+where the paper's Table 2 run reports the *broken* mirror-image policy
 (`α₂(0,2)=0.001, α₂(2,0)=1.000`) -- we did not reproduce that pathology,
 and the much-lower `br_gain` is the same phenomenon, not a separate
 discrepancy (a broken fiat link is a first-order welfare loss and would
