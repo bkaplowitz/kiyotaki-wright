@@ -221,7 +221,7 @@ transient-dependent as expected).
 | type | our `mu` | paper | verdict |
 |---|---|---|---|
 | T1 | good3=1.00 | good3=1.00 | MATCH (exact) |
-| T2 | good1=1.00 | good1=0.72 | path-dependent split (see below) |
+| T2 | good1=1.00 | good1=0.72 | policy-level gap (see below) |
 | T3 | good1=1.00 | good1=1.00 | MATCH |
 | T4 | good1=1.00 | good1=1.00 | MATCH |
 | T5 | good1=1.00 | good1=1.00 | MATCH |
@@ -229,14 +229,23 @@ transient-dependent as expected).
 Paper type 1 (code index 0) sits in autarky on its production good 3 with
 beliefs `q_1 = 0` while the other four types keep trading toward the
 commodity money good 1 -- the paper's "one skeptic in a working economy"
-endpoint. T2's paper value 0.72 leaves a 0.28 residual whose placement is
-recurrent-class/path dependent (paper p. 19: with T1 absent from trade,
-several absorbing splits exist); our run funnels all of T2's mass to good
-1, so we pin only the lower bound `mu[T2, good1] > 0.7`
-(`test_d_type1_autarky_sce`). `br_gain = 80.0` (T1): the working economy
-around the skeptic would objectively buy its good. Verdict: **MATCH** on
-T1/T3/T4/T5 (the values Fig. 10 prints as 1.00), **CONSISTENT** on T2
-(path-dependent residual).
+endpoint. The T2 row is a policy-level replication gap, not a
+distributional one: under our converged SCE policy, T2's holdings reach
+good1 = 1.00 from *every* initial distribution -- the recurrent class is
+unique -- so recurrent-class mu-selection (p. 19) cannot produce the
+paper's 0.72. The paper's Fig. 10 point therefore carries a *different SCE
+policy* (one that keeps T2 interior at 0.72) than the one our run
+converges to (T2 fully specialized on good 1). Which SCE Algorithm 2
+reaches is selection- and seed-dependent: the Delta(argmax) best response
+leaves off-path and indifferent policy entries free (p. 57), and the paper
+publishes no prompt recipes that would disambiguate (paper-check-sce.md
+item 3). Our reconstruction reaches a valid SCE -- `s <= 1e-9`,
+`b <= 1e-9`, `d <= 1e-12`, with `br_gain = 80.0` for T1 (the working
+economy around the skeptic would objectively buy its good) -- that is not
+Fig. 10's exact point; the test pins the honest lower bound
+`mu[T2, good1] > 0.7` (`test_d_type1_autarky_sce`). Verdict: **MATCH** on
+T1/T3/T4/T5 (the values Fig. 10 prints as 1.00); **VALID SCE, DIFFERENT
+ENDPOINT (policy-level gap)** on T2.
 
 ### H2 verdict
 
@@ -248,5 +257,7 @@ each dominated by the misdirected type -- versus 0 at every H1 Nash point
 (`test_nash_is_sce` pins the converse: started from the A1 Nash
 equilibrium, `solve_sce` stays there with `br_gain <= 1e-6`). Subjectively
 optimal, objectively poor, exactly as the paper's §7 misdirection
-experiments report. The A2 variant (paper fn. 10, deviation gain ~21.4)
-was not run -- optional in the brief and skipped.
+experiments report -- with the caveat that D's endpoint is a valid SCE but
+not Fig. 10's exact point (policy-level gap on T2, above). The A2 variant
+(paper fn. 10, deviation gain ~21.4) was not run -- optional in the brief
+and skipped.
