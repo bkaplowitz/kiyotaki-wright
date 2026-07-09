@@ -373,7 +373,7 @@ branch. B has no fundamental/speculative "condition flip" ambiguity
 so there is no analogous basin-selection risk here -- straightforward
 replication.
 
-### C -- MISMATCH (br_gain and stationarity both ~5-6x lower than paper)
+### C -- MISMATCH (br_gain ~21x and stationarity ~6x lower than paper)
 
 `br_gain = 0.594` (paper `12.8`), `stationarity = 0.0223` (paper `0.130`).
 Deployment aggregate `[0.3200, 0.3192, 0.1805, 0.1803]` vs the H1 C-money
