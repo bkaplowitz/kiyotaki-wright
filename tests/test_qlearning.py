@@ -27,6 +27,24 @@ def test_cons_update_delayed_until_next_meeting():
     assert np.isclose(lr.gbar[0], 0.5 * (99.0 + 3.0))
 
 
+def test_cons_update_same_good_bootstraps_off_qc():
+    """Same-good meeting (k == j_good): (i, k, j_good) is not a trade root --
+    lambda_feasible requires k != j, so QT[i, k, j_good, :] is the -inf
+    infeasibility mask. The pending consumption TD must instead bootstrap off
+    max_gamma QC[i, k, :]."""
+    e = get_economy("A1")
+    assert not e.lambda_feasible[0, 1, 1]              # k == j_good == 1 is same-good, infeasible
+    lr = QLearner(e, LearnerConfig(), np.random.default_rng(0), q_lr=0.5, eta=1.0)
+    lr.QC[0, 1, :] = [2.0, 5.0]
+    lr.observe_cons(ConsRecord(agent=0, i=0, h=0, gamma=1, h_next=1, r=99.0))
+    assert lr.QC[0, 0, 1] == 0.0                        # pending, not yet applied
+    lr.observe_meeting_agent(agent=0, i=0, k=1, j_good=1)  # same-good: k == j_good
+    expect = 0.5 * (99.0 - 0.0 + 5.0 - 0.0)
+    assert np.isclose(lr.QC[0, 0, 1], expect)
+    assert np.isclose(lr.gbar[0], 0.5 * (99.0 + 5.0))
+    assert np.isfinite(lr.QC).all()                     # canary: no -inf poisoning from the QT diagonal
+
+
 def test_dry_run_completes_all_econs():
     """Step 3: `run_learning` with `QLearner` on A1/C (and D for parity with
     MuZeroLearner's own dry-run test) completes and deployment arrays respect
