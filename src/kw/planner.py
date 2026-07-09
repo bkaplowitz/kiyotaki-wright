@@ -28,7 +28,9 @@ Two model backends share one `ModelBackend` lookup protocol, each method a
 per-type slice: `EmpiricalBackend` reads (m-hat, P-hat^t, P-hat^c, r-hat^t,
 r-hat^c) from the Task 8 `EmpiricalModel` (fully empirical case; q-hat is not
 part of this protocol since the trade kernel comes entirely from
-`p_trade`). `RulesBackend` (paper §6.4, Task 15) is not implemented here.
+`p_trade`). `RulesBackend` (paper §6.4, the known-environment variant) keeps the
+learned m-hat and q-hat but swaps the transition/reward kernels for the true
+environment rules -- q-hat feeds the trade kernel directly.
 
 `Planner` wraps a backend with the learner's current (alpha, beta, v) tables
 and `LearnerConfig` knobs, and memoizes the deterministic search per root
@@ -47,7 +49,14 @@ import numpy as np
 
 from kw.economies import Economy
 from kw.empirical_model import EmpiricalModel
+from kw.environment import next_holding_cons, reward_cons_table
 from kw.learners.base import LearnerConfig
+
+# Finite sentinel for infeasible consumption rewards (reward_cons_table uses
+# -inf): the non-greedy backup mixes beta*Psi^c and beta is exactly 0 on
+# infeasible gamma, so 0 * LARGE_NEG = 0 whereas 0 * (-inf) = nan would corrupt
+# W. Never survives a backup or diagnostic (feasible-masked everywhere).
+LARGE_NEG = -1e9
 
 
 class ModelBackend(Protocol):
@@ -84,6 +93,56 @@ class EmpiricalBackend:
 
     def r_cons(self, i: int) -> np.ndarray:
         return self.model.r_cons()[i]
+
+
+class RulesBackend:
+    """`ModelBackend` for the known-environment variant (paper §6.4,
+    architecture.md §7.2/§12.12): keep the learned meeting frequency m-hat and
+    offer-acceptance rate q-hat, but take the transition/reward kernels from the
+    exact environment rules instead of empirical counts.
+
+      p_trade(i)[k,j,0] = onehot(k);
+      p_trade(i)[k,j,1] = (1-q-hat[k,j])*onehot(k) + q-hat[k,j]*onehot(j)
+        (same-good rows k==j collapse to onehot(k) automatically);
+      p_cons(i)[h,gamma] = onehot(next_holding_cons[i,h,gamma]);
+      r_trade(i) == 0;  r_cons(i) = reward_cons_table[i], -inf -> LARGE_NEG.
+
+    m-hat and q-hat are type-independent (pooled over offerer type), so the
+    per-type methods return the same kernel for every i. The consumption and
+    reward kernels are precomputed once; the trade kernel is rebuilt per query
+    because q-hat moves as play accumulates.
+    """
+
+    def __init__(self, econ: Economy, model: EmpiricalModel) -> None:
+        self.econ = econ
+        self.model = model
+        rc = reward_cons_table(econ)
+        self._r_cons = np.where(np.isfinite(rc), rc, LARGE_NEG)
+        self._p_cons = np.eye(econ.n_goods)[next_holding_cons(econ)]
+        self._r_trade = np.zeros((econ.n_goods, econ.n_goods, 2), dtype=np.float64)
+        self._eye = np.eye(econ.n_goods)
+
+    def m(self, i: int) -> np.ndarray:
+        return self.model.m_hat()[i]
+
+    def p_trade(self, i: int) -> np.ndarray:
+        q = self.model.q_hat()[:, :, None]
+        onehot_k = self._eye[:, None, :]
+        onehot_j = self._eye[None, :, :]
+        g = self.econ.n_goods
+        pt = np.empty((g, g, 2, g), dtype=np.float64)
+        pt[:, :, 0, :] = onehot_k
+        pt[:, :, 1, :] = (1.0 - q) * onehot_k + q * onehot_j
+        return pt
+
+    def p_cons(self, i: int) -> np.ndarray:
+        return self._p_cons[i]
+
+    def r_trade(self, i: int) -> np.ndarray:
+        return self._r_trade
+
+    def r_cons(self, i: int) -> np.ndarray:
+        return self._r_cons[i]
 
 
 def dp_tables(

@@ -1,4 +1,4 @@
-"""Tabular PUCT self-play learner: paper Algorithms 3-4, fully empirical variant.
+"""Tabular PUCT self-play learner: paper Algorithms 3-4 (empirical + known-env).
 
 This is the paper's MuZero-style learner (architecture.md §7.2-§7.3). It owns
 *only* the pieces the fairness contract (§7.5) assigns to a `Learner`: routing
@@ -10,13 +10,19 @@ delegated: the `EmpiricalModel`/`ModelBank` (Task 8) accumulate M-hat, and one
 allocation and memoizes each root's (pi, value) for the iteration (§6.3.5).
 The learner never reimplements a DP recursion or a bandit loop.
 
-Fully empirical case (all three orthogonal flags off): the trade kernel comes
-entirely from the empirical `p_trade` count table, so `observe_offer`/q-hat is
-never fed (fidelity 12.10 — q-hat is a `RulesBackend` input, absent here) and
-same-good meetings (k == j) short-circuit to no-offer without touching the
-model or planner (adjudication 3). `known_rules=True` and `per_agent=True` are
-accepted but raise `NotImplementedError` (no `RulesBackend` in planner.py; the
-action protocol carries no agent id to route per-agent banks).
+Two backend regimes (chosen by `known_rules`, wired identically into the
+training and deployment planners via `_make_backend`):
+  - Fully empirical (`known_rules=False`, all three flags off): the trade kernel
+    comes entirely from the empirical `p_trade` count table, so `observe_offer`/
+    q-hat is never fed (fidelity 12.10 — q-hat is a `RulesBackend` input, absent
+    here) and same-good meetings (k == j) short-circuit to no-offer without
+    touching the model or planner (adjudication 3).
+  - Known environment (`known_rules=True`, paper §6.4): a `RulesBackend` keeps
+    the learned m-hat/q-hat but takes the transition/reward kernels from the true
+    rules; `observe_trade` additionally feeds `observe_offer` (opposite-direction
+    acceptance evidence, still skipping k == j) so q-hat can move off its prior.
+`per_agent=True` is accepted but raises `NotImplementedError` (the action
+protocol carries no agent id to route per-agent banks).
 
 RNG discipline (§12.2): action sampling draws from the per-call `rng` argument
 threaded by `simulate.run_learning`, so a run is reproduced by (econ, cfg,
@@ -55,7 +61,7 @@ import numpy as np
 from kw.economies import Economy
 from kw.empirical_model import ModelBank
 from kw.learners.base import ConsRecord, LearnerConfig, TradeRecord
-from kw.planner import EmpiricalBackend, Planner
+from kw.planner import EmpiricalBackend, Planner, RulesBackend
 
 
 class MuZeroLearner:
@@ -72,10 +78,6 @@ class MuZeroLearner:
         ema_gain: float = 0.0,
         per_agent: bool = False,
     ) -> None:
-        if known_rules:
-            raise NotImplementedError(
-                "known_rules requires a RulesBackend; planner.py implements only EmpiricalBackend"
-            )
         if per_agent:
             raise NotImplementedError(
                 "per_agent banks need an agent id, absent from the trade/cons action protocol"
@@ -83,6 +85,7 @@ class MuZeroLearner:
         self.econ = econ
         self.cfg = cfg
         self.rng = rng
+        self.known_rules = known_rules
         self.greedy_backup = greedy_backup
         self.centered_values = centered_values
         self.eps = cfg.eps_floor
@@ -94,13 +97,22 @@ class MuZeroLearner:
         self.bank = ModelBank(econ, n_banks=1, kappa0=cfg.kappa0, ema_gain=ema_gain)
         self.model = self.bank[0]
         self.planner = Planner(
-            econ, EmpiricalBackend(self.model), self.alpha, self.beta, self.v,
+            econ, self._make_backend(), self.alpha, self.beta, self.v,
             cfg, greedy=greedy_backup,
         )
 
         # (i,k,j) -> [count, pi(1), root_value]; (i,h) -> [count, pi(1), root_value].
         self._trade_visits: dict[tuple[int, int, int], list] = {}
         self._cons_visits: dict[tuple[int, int], list] = {}
+
+    def _make_backend(self):
+        """Backend for both the training and deployment planners: the known-
+        environment variant plugs learned (m-hat, q-hat) into the true rules
+        (`RulesBackend`); the fully-empirical variant reads every kernel from
+        counts (`EmpiricalBackend`). Both wrap the same shared model."""
+        if self.known_rules:
+            return RulesBackend(self.econ, self.model)
+        return EmpiricalBackend(self.model)
 
     def observe_meeting(self, i: int, j_good: int) -> None:
         self.model.observe_meeting(i, j_good)
@@ -127,6 +139,12 @@ class MuZeroLearner:
 
     def observe_trade(self, rec: TradeRecord) -> None:
         self.model.observe_trade(rec)
+        # Known-environment only: the acceptance decision by the holder of rec.k
+        # (offered rec.j) is evidence for the opposite-direction query q-hat[rec.j,
+        # rec.k] that a holder of rec.j makes about a partner holding rec.k
+        # (adjudication; fidelity 12.10 -- the empirical variant never feeds q-hat).
+        if self.known_rules and rec.k != rec.j:
+            self.model.observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))
 
     def observe_cons(self, rec: ConsRecord) -> None:
         self.model.observe_cons(rec)
@@ -194,7 +212,7 @@ class MuZeroLearner:
             cfg, horizon=cfg.h_dep, n_sims=cfg.n_sims_dep, tau=cfg.tau_dep
         )
         planner = Planner(
-            econ, EmpiricalBackend(self.model), self.alpha, self.beta, self.v,
+            econ, self._make_backend(), self.alpha, self.beta, self.v,
             dep_cfg, greedy=self.greedy_backup,
         )
         n_types, n_goods = econ.n_types, econ.n_goods
