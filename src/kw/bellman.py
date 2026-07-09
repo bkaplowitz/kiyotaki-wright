@@ -6,6 +6,10 @@ variants take the population marginal `agg (G,)` and reciprocation kernel
 `Q (G,G)`; the subjective variants for Solver 2 (architecture.md §6.2) take a
 type's own beliefs `m_i (G,)`, `q_i (G,G)` in their place — kernel T_q of
 (S2)-(S3) has the same algebraic form, so both share one iteration core.
+`greedy_policy` optionally implements a minimal-movement selection from the
+paper's set-valued Δ(argmax) best response (eq. BR-e), keeping the incumbent
+policy entry at indifference — needed because some equilibria (Economy C's
+on-path fiat indifference, Economy D) have interior α exactly at margin 0.
 
 Stopping rule: alongside the standard RVI criterion (sup-norm on successive
 normalized V and on g), the loop also stops once the per-state Bellman
@@ -184,20 +188,42 @@ def greedy_policy(
     Q: np.ndarray,
     V: np.ndarray,
     W: np.ndarray,
+    *,
+    current: tuple[np.ndarray, np.ndarray] | None = None,
+    tie_tol: float = 1e-9,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Pointwise best response (BR-e)/(BR-c); ties break to action 0.
+    """Pointwise best response (BR-e)/(BR-c) with a selection rule at ties.
 
-    Offer iff Q(k,j)*(W(j) - W(k)) > 0, masked to feasible lambda; consume
-    iff r[i,h,1] + V[f[i]] > r[i,h,0] + V[h] (infeasible gamma has reward
-    -inf, so it never wins).
+    Offer margin is Q(k,j)*(W(j) - W(k)); consumption margin is
+    (r[i,h,1] + V[c(h,1)]) - (r[i,h,0] + V[c(h,0)]) (infeasible gamma has
+    reward -inf, so it never wins). Entry-wise: margin above the tie band ->
+    1, below -> 0, and inside the band the entry keeps the incumbent value
+    from `current = (alpha_i, beta_i)` when given, else falls back to the
+    strict-> collapse to 0. The band is tie_tol * max(1, max|W|): margins are
+    differences of bias values whose scale max|W| tracks, so tie_tol is a
+    relative tolerance (with a floor of 1 near the all-zero bias). Keeping
+    the incumbent at indifference is a selection from the paper's set-valued
+    Delta(argmax) best response (eq. BR-e): some equilibria (Economy C's
+    on-path fiat indifference, Economy D) hold interior alpha exactly at
+    margin 0, which a forced 0/1 selection can never keep stationary.
+    Infeasible lambda entries are 0 regardless.
     """
     gain = Q * (W[None, :] - W[:, None])
-    alpha_i = ((gain > 0) & econ.lambda_feasible[i]).astype(np.float64)
-
     r = reward_cons_table(econ)[i]
     c = next_holding_cons(econ)[i]
     values = r + V[c]
-    beta_i = (values[:, 1] > values[:, 0]).astype(np.float64)
+
+    if current is None:
+        alpha_i = ((gain > 0) & econ.lambda_feasible[i]).astype(np.float64)
+        beta_i = (values[:, 1] > values[:, 0]).astype(np.float64)
+        return alpha_i, beta_i
+
+    alpha_cur, beta_cur = current
+    band = tie_tol * max(1.0, float(np.abs(W).max()))
+    alpha_i = np.where(np.abs(gain) <= band, alpha_cur, (gain > band).astype(np.float64))
+    alpha_i = np.where(econ.lambda_feasible[i], alpha_i, 0.0)
+    cons_gain = values[:, 1] - values[:, 0]
+    beta_i = np.where(np.abs(cons_gain) <= band, beta_cur, (cons_gain > band).astype(np.float64))
     return alpha_i, beta_i
 
 

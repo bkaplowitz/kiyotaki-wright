@@ -87,3 +87,25 @@ def test_policy_eval_subjective_no_trade_gain_is_minus_storage():
     beta_i[e.consume_idx[0]] = 1.0
     g, V = policy_eval_subjective(e, 0, alpha_i, beta_i, m_i, q_i)
     assert np.isclose(g, -e.s[e.f[0]], atol=1e-9)     # f(0)=1 → g = -s[1] = -1.0
+
+def test_greedy_tie_keeps_incumbent_when_current_given():
+    e = get_economy("A1")
+    Q = np.zeros((3, 3))                              # margin = Q*(W[j]-W[k]) = 0: all-tie
+    V = np.array([0.0, 0.0, 19.0])                    # h=2: cons -1+V[1] == stay -20+V[2]
+    W = np.array([0.0, 1.0, 2.0])
+    alpha_cur = 0.37 * e.lambda_feasible[0]
+    beta_cur = np.array([1.0, 0.4, 0.7])
+    a_i, b_i = greedy_policy(e, 0, Q, V, W, current=(alpha_cur, beta_cur))
+    assert np.array_equal(a_i, alpha_cur)             # every feasible offer entry is tied
+    assert b_i[0] == 1.0                              # consume own good: strict, 99 > -0.1
+    assert b_i[1] == beta_cur[1]                      # h=f(0): exact cons/stay tie
+    assert b_i[2] == beta_cur[2]                      # engineered tie via V[2]=19
+
+def test_greedy_without_current_collapses_ties_to_zero():
+    e = get_economy("A1")
+    Q = np.zeros((3, 3))
+    V = np.array([0.0, 0.0, 19.0])
+    W = np.array([0.0, 1.0, 2.0])
+    a_i, b_i = greedy_policy(e, 0, Q, V, W)
+    assert np.array_equal(a_i, np.zeros((3, 3)))      # strict >: margin 0 → reject
+    assert np.array_equal(b_i, np.array([1.0, 0.0, 0.0]))
