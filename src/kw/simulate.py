@@ -29,13 +29,14 @@ reproduced by (econ, learner state machine, cfg, seed). Matched pairs are
 processed in draw order (perm[2m], perm[2m+1]) and both agents' trade records
 are appended online in that same order.
 
-Stopping rule (D1): the consecutive-below-threshold streak counter starts
-accumulating from iteration 1, not from n_min — an early lucky run of
-Delta-bar_n <= delta_stop already counts toward patience once n_min is
-reached, rather than being discarded and restarted at n_min. This matches
-the paper's phrasing ("Delta-bar_n <= delta for p consecutive iterations,
-after n_min") literally: the *after n_min* qualifier gates when the streak
-may trigger a stop, not when the streak itself starts being counted.
+Stopping rule (D1): paper Algorithm 4 line 7 breaks at the first 0-based
+iteration n with n >= n_min + p - 1 whose last p deltas all satisfy
+Delta-bar <= delta, which in this file's 1-based iteration count is the
+first n >= n_min + patience carrying a live streak of at least patience.
+The gate places the entire triggering window strictly after iteration
+n_min, so a sub-threshold streak straddling n_min cannot stop the loop
+early (the Algorithm 4 pseudocode is stricter than the section 6.3.4
+prose "for p consecutive iterations, after n_min", and governs).
 Deployment extraction (`learner.deployment_policy()`) always runs, whether
 the loop stopped early or hit the n_iters_max cap.
 
@@ -189,7 +190,7 @@ def run_learning(econ: Economy, learner: Learner, cfg: LearnerConfig, seed: int)
         trace["delta"].append(delta)
 
         streak = streak + 1 if delta <= cfg.delta_stop else 0
-        if n >= cfg.n_min and streak >= cfg.patience:
+        if n >= cfg.n_min + cfg.patience and streak >= cfg.patience:
             break
 
     alpha_star, beta_star = learner.deployment_policy()
