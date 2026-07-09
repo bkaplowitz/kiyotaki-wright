@@ -65,9 +65,9 @@ def test_d_type1_autarky_sce():
         "paper types 3-5 should accumulate good 1 (Fig 10: 1.00 each)"
     )
     assert res.mu[1, 0] > 0.7, (
-        "paper type 2 holds at least the Fig 10 share 0.72 of good 1; the "
-        "0.72/0.28 split is recurrent-class/path dependent (paper p. 19) and "
-        "our run reaches 1.0"
+        "lower bound on paper type 2's good-1 share: our converged SCE "
+        "policy fully specializes T2 at 1.00, vs Fig 10's 0.72 -- a "
+        "policy-level gap (different SCE endpoint), see findings.md H2"
     )
     b, _ = br_gain(e, res.alpha, res.beta, res.mu)
     assert b > 1.0                                    # type 1's autarky is objectively suboptimal
