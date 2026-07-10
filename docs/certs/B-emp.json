@@ -1,0 +1,20 @@
+{
+  "econ": "B",
+  "dyna": "emp",
+  "run_dir": "runs/B/dyna-emp/0",
+  "n_iters": 180,
+  "replay_elapsed_seconds": 3284.2,
+  "replay_matches_artifacts": {
+    "alpha_star": true,
+    "beta_star": true,
+    "mu_star": true
+  },
+  "cert_qhat_prior_pooled": {
+    "s": 2.0422205774599567,
+    "b_belief": 0.5
+  },
+  "cert_q_implied_from_p_trade": {
+    "s": 1.8561169767713181,
+    "b_belief": 0.5370413411486801
+  }
+}

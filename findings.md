@@ -843,7 +843,9 @@ for rules cells `q̂ = model.q_hat()` (the pooled acceptance belief the
 so their pooled `q̂` sits at the uninformative 0.5 prior — both that
 literal prior and the *implied* acceptance belief embedded in the learned
 transition kernel, `q̃[i,k,j] = p_trade[i,k,j,λ=1,h′=j]`, are reported.
-`mu = mu_star` from the artifacts.
+`mu = mu_star` from the artifacts. The five raw certificate JSONs
+(including each cell's `replay_matches_artifacts` byte-identity proof) are
+archived unmodified under `docs/certs/`.
 
 | cell | objective br_gain | subjective gap s | on-path belief error b |
 |---|---|---|---|

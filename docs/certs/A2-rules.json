@@ -1,0 +1,16 @@
+{
+  "econ": "A2",
+  "dyna": "rules",
+  "run_dir": "runs/A2/dyna-rules/0",
+  "n_iters": 180,
+  "replay_elapsed_seconds": 3229.6,
+  "replay_matches_artifacts": {
+    "alpha_star": true,
+    "beta_star": true,
+    "mu_star": true
+  },
+  "cert_qhat_pooled": {
+    "s": 1.1027623258996755e-11,
+    "b_belief": 0.5028312382848887
+  }
+}
