@@ -84,6 +84,24 @@ RNG discipline (§12.2): action sampling draws from the per-call `rng`
 argument threaded by `simulate.run_learning`. The constructor `rng` is
 stored but reserved for action sampling, matching `MuZeroLearner` -- Dyna's
 planning-root sampling is the one place this learner draws from it directly.
+
+Decay arms (Task 18, both off by default and then byte-identical to the
+constant-parameter baseline above):
+  - `eps_start` anneals the behavior epsilon on the paper's zeta schedule
+    shape, eps_n = max(cfg.eps_floor, eps_start * cfg.zeta_decay**(n-1)),
+    advanced once per `end_iteration`; `eps_start=None` keeps today's
+    constant eps = cfg.eps_floor.
+  - `q_lr_visit=True` replaces the constant real-experience TD step with the
+    Robbins-Monro-style per-visit step q_lr / sqrt(n_visits(cell)), counted
+    per updated Q cell (per-visit rather than a global 1/sqrt(t) clock: the
+    stuck cells' problem is sparse visitation of the rescue links, and a
+    global clock would shrink a rarely-visited cell's step before it has
+    received samples). The consumption TD's paired `gbar` move shares the
+    same decayed step, mirroring the constant rule gbar += eta * a * delta_C.
+    Dyna planning backups keep the constant `q_lr`: they are deterministic
+    expected backups under the current model, not stochastic-approximation
+    steps, so the per-visit schedule (which exists to tame sampling noise)
+    does not apply, and the proven planning code stays untouched.
 """
 
 import numpy as np
@@ -107,6 +125,8 @@ class QLearner:
         eta: float = 0.5,
         dyna_k: int = 20,
         per_agent: bool = False,
+        eps_start: float | None = None,
+        q_lr_visit: bool = False,
     ) -> None:
         if per_agent:
             raise NotImplementedError(
@@ -114,6 +134,10 @@ class QLearner:
             )
         if dyna not in ("none", "emp", "rules"):
             raise ValueError(f"dyna={dyna!r} must be one of 'none', 'emp', 'rules'")
+        if eps_start is not None and not (cfg.eps_floor <= eps_start <= 1.0):
+            raise ValueError(
+                f"eps_start={eps_start} must lie in [cfg.eps_floor={cfg.eps_floor}, 1]"
+            )
         self.econ = econ
         self.cfg = cfg
         self.rng = rng
@@ -122,7 +146,9 @@ class QLearner:
         self.eta = eta
         self.dyna_k = dyna_k
         self.per_agent = per_agent
-        self.eps = cfg.eps_floor
+        self.eps_start = eps_start
+        self.q_lr_visit = q_lr_visit
+        self.eps = cfg.eps_floor if eps_start is None else eps_start
 
         n_types, n_goods = econ.n_types, econ.n_goods
         self.QT = np.zeros((n_types, n_goods, n_goods, 2), dtype=np.float64)
@@ -130,6 +156,8 @@ class QLearner:
         self.QC = np.zeros((n_types, n_goods, 2), dtype=np.float64)
         self.QC[..., 1] = np.where(econ.gamma_feasible, 0.0, -np.inf)
         self.gbar = np.zeros(n_types, dtype=np.float64)
+        self._qt_visits = np.zeros_like(self.QT) if q_lr_visit else None
+        self._qc_visits = np.zeros_like(self.QC) if q_lr_visit else None
 
         self.bank = None
         self.model = None
@@ -190,9 +218,13 @@ class QLearner:
             self._kernel_cache.clear()
         if not self.econ.lambda_feasible[rec.i, rec.k, rec.j]:
             return
+        step = self.q_lr
+        if self.q_lr_visit:
+            self._qt_visits[rec.i, rec.k, rec.j, rec.lam] += 1.0
+            step = self.q_lr / np.sqrt(self._qt_visits[rec.i, rec.k, rec.j, rec.lam])
         target = float(np.max(self.QC[rec.i, rec.h_next, :]))
         delta_t = target - self.QT[rec.i, rec.k, rec.j, rec.lam]
-        self.QT[rec.i, rec.k, rec.j, rec.lam] += self.q_lr * delta_t
+        self.QT[rec.i, rec.k, rec.j, rec.lam] += step * delta_t
         if self.dyna != "none":
             self._plan()
 
@@ -210,9 +242,13 @@ class QLearner:
             target = float(np.max(self.QC[i, k, :]))
         else:
             target = float(np.max(self.QT[i, k, j_good, :]))
+        step = self.q_lr
+        if self.q_lr_visit:
+            self._qc_visits[rec.i, rec.h, rec.gamma] += 1.0
+            step = self.q_lr / np.sqrt(self._qc_visits[rec.i, rec.h, rec.gamma])
         delta_c = rec.r - self.gbar[rec.i] + target - self.QC[rec.i, rec.h, rec.gamma]
-        self.QC[rec.i, rec.h, rec.gamma] += self.q_lr * delta_c
-        self.gbar[rec.i] += self.eta * self.q_lr * delta_c
+        self.QC[rec.i, rec.h, rec.gamma] += step * delta_c
+        self.gbar[rec.i] += self.eta * step * delta_c
         if self.dyna != "none":
             self._plan()
 
@@ -306,6 +342,9 @@ class QLearner:
         n_c = len(cons_feasible)
 
         delta = (sum_t + sum_c) / max(1, n_t + n_c)
+
+        if self.eps_start is not None:
+            self.eps = max(self.cfg.eps_floor, self.eps_start * self.cfg.zeta_decay**n)
 
         self._alpha_prev, self._beta_prev = alpha_new, beta_new
         self._trade_visited, self._cons_visited = set(), set()

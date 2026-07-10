@@ -69,3 +69,63 @@ def test_policies_respect_clip_and_masks():
     lr = QLearner(e, DRY, np.random.default_rng(1))
     res = run_learning(e, lr, DRY, seed=1)
     assert (res.beta_star[:, 0] == 0).all()          # fiat never consumable
+
+
+def test_eps_start_decays_geometrically_to_floor():
+    """Task 18 decay arm: `eps_start` anneals exploration epsilon on the zeta
+    schedule shape, eps_n = max(eps_floor, eps_start * zeta_decay**(n-1));
+    default (eps_start=None) keeps today's constant eps == cfg.eps_floor."""
+    e = get_economy("A1")
+    cfg = LearnerConfig()
+    lr = QLearner(e, cfg, np.random.default_rng(0), eps_start=0.5)
+    assert lr.eps == 0.5                              # iteration 1 explores at eps_start
+    lr.end_iteration(1)
+    assert np.isclose(lr.eps, 0.5 * cfg.zeta_decay)   # iteration 2's epsilon
+    for n in range(2, 120):
+        lr.end_iteration(n)
+        assert lr.eps >= cfg.eps_floor
+    assert lr.eps == cfg.eps_floor                    # floored, never below
+
+    default = QLearner(e, cfg, np.random.default_rng(0))
+    assert default.eps == cfg.eps_floor
+    default.end_iteration(1)
+    assert default.eps == cfg.eps_floor               # flag off: byte-identical constant
+
+
+def test_q_lr_visit_decays_trade_step_per_cell():
+    """Task 18 decay arm: `q_lr_visit` scales each real TD update by
+    1/sqrt(n_visits) of the updated cell; flag off keeps the constant step."""
+    e = get_economy("A1")
+    rec = TradeRecord(agent=0, i=0, k=0, j=1, lam=1, h_next=1, r=0.0)
+
+    lr = QLearner(e, LearnerConfig(), np.random.default_rng(0), q_lr=0.5, q_lr_visit=True)
+    lr.QC[0, 1, :] = [2.0, 6.0]
+    lr.observe_trade(rec)                             # visit 1: step 0.5/sqrt(1)
+    assert np.isclose(lr.QT[0, 0, 1, 1], 0.5 * 6.0)
+    lr.observe_trade(rec)                             # visit 2: step 0.5/sqrt(2)
+    assert np.isclose(lr.QT[0, 0, 1, 1], 3.0 + (0.5 / np.sqrt(2.0)) * (6.0 - 3.0))
+
+    const = QLearner(e, LearnerConfig(), np.random.default_rng(0), q_lr=0.5)
+    const.QC[0, 1, :] = [2.0, 6.0]
+    const.observe_trade(rec)
+    const.observe_trade(rec)                          # flag off: constant 0.5 both times
+    assert np.isclose(const.QT[0, 0, 1, 1], 3.0 + 0.5 * 3.0)
+
+
+def test_q_lr_visit_decays_cons_step_and_gbar_together():
+    """The consumption-stage TD and its gbar move share one decayed step, as in
+    the constant-step rule gbar += eta * a * delta_C."""
+    e = get_economy("A1")
+    lr = QLearner(e, LearnerConfig(), np.random.default_rng(0), q_lr=0.5, eta=1.0,
+                  q_lr_visit=True)
+    lr.QT[0, 1, 2, :] = [1.0, 3.0]
+    lr.observe_cons(ConsRecord(agent=0, i=0, h=0, gamma=1, h_next=1, r=99.0))
+    lr.observe_meeting_agent(agent=0, i=0, k=1, j_good=2)  # visit 1: step 0.5
+    assert np.isclose(lr.QC[0, 0, 1], 0.5 * (99.0 - 0.0 + 3.0 - 0.0))
+    lr.gbar[0] = 0.0                                  # isolate the second step size
+    lr.observe_cons(ConsRecord(agent=0, i=0, h=0, gamma=1, h_next=1, r=99.0))
+    lr.observe_meeting_agent(agent=0, i=0, k=1, j_good=2)  # visit 2: step 0.5/sqrt(2)
+    step2 = 0.5 / np.sqrt(2.0)
+    delta2 = 99.0 - 0.0 + 3.0 - 51.0
+    assert np.isclose(lr.QC[0, 0, 1], 51.0 + step2 * delta2)
+    assert np.isclose(lr.gbar[0], step2 * delta2)

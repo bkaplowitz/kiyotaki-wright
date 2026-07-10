@@ -21,7 +21,12 @@ through `kw.extensions.qlearning.QLearner` (Task 15, ext §4's differential
 average-reward TD baseline) at its default hyperparameters (q_lr=0.1,
 eta=0.5, dyna="none"). `--learner dyna-emp`/`dyna-rules` route through the
 same `QLearner` with `dyna="emp"`/`dyna="rules"` (Task 16, ext §4's Dyna-Q
-planning backups on top of the same TD baseline).
+planning backups on top of the same TD baseline). The QLearner-path decay
+arms (Task 18): `--eps-start X` anneals epsilon from X down to eps_floor on
+the zeta schedule shape; `--q-lr-visit` switches the real-experience TD step
+to per-visit q_lr/sqrt(n_visits). Both default off (paper-exact constants);
+like `--ema-gain` on the q path, they are recorded in the manifest but
+unused by learners that do not consume them.
 
 Per-iteration diagnostics: `RunResult.trace` (simulate.py) carries no policy
 snapshots by design (the fairness contract forbids modifying simulate.py to
@@ -162,12 +167,18 @@ def _muzero_factory(econ, cfg, rng, flags, args) -> MuZeroLearner:
 
 
 def _q_factory(econ, cfg, rng, flags, args) -> QLearner:
-    return QLearner(econ, cfg, rng, per_agent=args.per_agent)
+    return QLearner(
+        econ, cfg, rng, per_agent=args.per_agent,
+        eps_start=args.eps_start, q_lr_visit=args.q_lr_visit,
+    )
 
 
 def _dyna_factory(dyna: str):
     def factory(econ, cfg, rng, flags, args) -> QLearner:
-        return QLearner(econ, cfg, rng, dyna=dyna, per_agent=args.per_agent)
+        return QLearner(
+            econ, cfg, rng, dyna=dyna, per_agent=args.per_agent,
+            eps_start=args.eps_start, q_lr_visit=args.q_lr_visit,
+        )
 
     return factory
 
@@ -217,6 +228,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--per-agent", action="store_true")
     parser.add_argument("--eps-floor", type=float, default=None)
     parser.add_argument("--kappa0", type=float, default=None)
+    parser.add_argument("--eps-start", type=float, default=None)
+    parser.add_argument("--q-lr-visit", action="store_true")
     parser.add_argument("--n-iters-max", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -287,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         "per_agent": args.per_agent,
         "eps_floor": cfg.eps_floor,
         "kappa0": cfg.kappa0,
+        "eps_start": args.eps_start,
+        "q_lr_visit": args.q_lr_visit,
         "dry_run": args.dry_run,
         "out": str(args.out),
         "learner_cfg": dataclasses.asdict(cfg),
