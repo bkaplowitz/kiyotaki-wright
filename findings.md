@@ -658,3 +658,133 @@ stationarity values confirm this is a sampling artifact of `mu_emp`, and the
 vacuous `mu_star` residual (`~1e-13` even for non-Nash D) was deliberately
 *not* substituted to force a match. No hyperparameter was changed and no
 library code edited for any of these outcomes.
+
+## Stage-2 grid (H5, H6)
+
+**H5 (attribution, ext §2): the known-environment rescue seen in H4 comes
+mainly from model *contents* (the known one-step rules), not planner
+sophistication — Dyna-rules should behave like known-env PUCT
+(`muzero-known`) and Dyna-emp like empirical PUCT (`muzero-emp`). H6: fully
+model-free differential Q-learning (realized payoffs only, the EWA δ≈0
+pole) is at least as prone to SCE traps as the empirical learner.** The
+instruments are the three Stage-2 learners (`q`, `dyna-emp`, `dyna-rules`;
+Tasks 15–16, ext §4), which share one tabular Q-learning core and differ
+only in planning backend — none, learned empirical model, known rules —
+compared against the two MuZero variants' existing H3/H4 artifacts (the
+`muzero-emp`/`muzero-known` columns are read from `runs/`, not re-run).
+
+Reproduce with:
+
+```bash
+for econ in A1 A2 B C D; do for lrn in q dyna-emp dyna-rules; do
+  uv run python scripts/run_learning.py --economy $econ --learner $lrn --seed 0 \
+    --out runs/$econ/$lrn/0
+done; done
+```
+
+All 15 runs use `LearnerConfig()` Table-1 defaults (`n_agents=1800,
+rounds=35, n_iters_max=180, ...`), seed 0, learner defaults (`q_lr=0.1`,
+`eta=0.5`, `dyna_k=20`, `kappa0=2.0` count priors). Deployment `br_gain` is
+`max` over the per-type gaps at `mu_star`, exactly as in H3/H4. Two caveats
+up front, disclosed rather than smoothed over. (1) **No Stage-2 cell
+satisfies the (D1) stopping rule**: every run hits the `n_iters_max=180`
+cap with `converged=False` (the `QLearner`'s hard 0/1 greedy policies keep
+the (D1) `delta` metric high even when the policy is locked in), whereas
+every MuZero run stops at `n_iters=108` with `converged=True`. Capped-cell
+gains are therefore "at 180 iterations", not "at convergence"; the
+extended-horizon check below tests whether the cap binds. (2) The
+`A1/dyna-emp` cell ran on the pre-cache code (commit `6bb1427`, elapsed
+6783 s); all other dyna cells ran after the kernel-cache commit
+(`cb9cf29`, ~2400–3750 s). The cache was proven byte-identical
+(`np.array_equal` on all 20 output arrays over 4 econ×backend configs)
+before being committed, so the artifacts are interchangeable. Additionally,
+`C/q`'s per-iteration `br_gain_series` carries 5 `nan` snapshots out of 180
+(RVI non-convergence on hard-greedy early snapshots, recorded as `nan` per
+`run_learning.py`'s tolerant-diagnostics policy); all deployment-policy
+numbers below are finite.
+
+Deployment `br_gain` (max over types), seed 0:
+
+| econ | q | dyna-emp | dyna-rules | muzero-emp | muzero-known |
+|---|---|---|---|---|---|
+| A1 | 5.04912e-11 | 5.04912e-11 | 5.04912e-11 | 5.04841e-11 | 0.0 |
+| A2 | 1.13687e-13 | 6.16751e-12 | 34.1605 | 6.18172e-12 | 0.0 |
+| B  | 7.22222 | 2.88889 | 0.0 | 0.0 | 0.0 |
+| C  | 0.517958 | 0.0 | 0.517958 | 0.59416 | 0.0 |
+| D  | 3.67678 | 0.862965 | 0.092762 | 0.626035 | 0.0201752 |
+
+### A1 — all five learners at the fundamental Nash
+
+Every learner, including plain `q`, lands on H1's fundamental
+commodity-money aggregate `[0.5, 0.3333, 0.1667]` with gain ≤ 5.05e-11.
+A1's equilibrium is reachable by pure model-free TD; planning adds nothing
+because there is nothing left to fix. Uninformative for H5, consistent with
+H6 (no trap to fall into).
+
+### A2 — `q` and `dyna-emp` at gain ≈ 0; `dyna-rules` destabilizes late
+
+`dyna-emp` reproduces `muzero-emp` almost exactly — same speculative-branch
+aggregate `[0.5286, 0.2357, 0.2357]`, gains 6.16751e-12 vs 6.18172e-12 —
+the cleanest H5 pairing in the grid. Plain `q` reaches gain 1.13687e-13 at
+aggregate `[0.1667, 0.5, 0.3333]`, a *third* basin distinct from both H1
+branches (a mirrored arrangement with good 2 as the medium; recorded as
+found, not catalogued in H1). The anomaly is `dyna-rules`: final gain
+34.1605 (all on type 0) at the speculative aggregate — of the same order
+as the paper's own A2 empirical-learner gain ≈ 21 — and its training series
+shows it sat at gain 6.16751e-12 as late as iteration 129 before *leaving*:
+a late destabilization, not a failure to find the equilibrium. This cell
+violates the H5 prediction (`dyna-rules` ≠ `muzero-known`'s 0.0) and is
+dissected in the extended-horizon check below.
+
+### B — rules model rescues; empirical Dyna and `q` trap
+
+`dyna-rules` reaches gain exactly 0.0 at `[0.5286, 0.2357, 0.2357]` (the
+same aggregate `muzero-emp` converged to), matching `muzero-known`'s ≈ 0 as
+H5 predicts. `q` traps hard at 7.22222 (type 0) on `[0.5, 0.1667, 0.3333]`
+and `dyna-emp` at 2.88889 (per-type `[-8.3e-12, 2.889, 2.0]`) on
+`[0.3333, 0.5, 0.1667]` — worse than `muzero-emp`'s 0.0, so the
+`dyna-emp ≈ muzero-emp` half of H5 fails on B, while the ordering
+q > dyna-emp > dyna-rules ≈ 0 is exactly the model-contents gradient H5
+posits and `q`'s being worst is consistent with H6.
+
+### C — `dyna-emp` finds the fiat SNE that `muzero-emp` missed
+
+All three Stage-2 learners land on the fiat-SNE aggregate
+`[0.32, 0.293, 0.2456, 0.1414]` (H1's C equilibrium, which `muzero-known`
+also reaches at gain 0). `dyna-emp` attains gain exactly 0.0 there —
+*better* than `muzero-emp`, which stopped at 0.59416 on a different
+aggregate (H3's documented C collapse). `q` and `dyna-rules` sit at an
+identical 0.517958 (all on the per-type index-1 entry) on the correct
+aggregate: right distribution, one type short of best-responding. C thus
+breaks the H5 pairing in the *favorable* direction for Dyna-emp (planning
+sweeps over a learned model beat PUCT with the same model class here), and
+`q`'s 0.518 < `muzero-emp`'s 0.594 makes C the one economy where H6's
+"at least as prone" reads as a tie rather than a Q-learning deficit.
+
+### D — clean H5 gradient
+
+Every learner lands on a different aggregate, but the gains order exactly
+as H5 predicts: rules-model variants an order of magnitude below
+empirical-model variants (`dyna-rules` 0.092762 ~ `muzero-known` 0.0201752,
+both small; `dyna-emp` 0.862965 ~ `muzero-emp` 0.626035, both order-1), and
+model-free `q` worst at 3.67678 (H6). D's deployment stationarity for the
+two dyna cells (0.129, 0.226) is well above the ~0.024 finite-N floor seen
+elsewhere in the grid (all other Stage-2 cells: 0.010–0.143) — their
+deployed policies' invariants disagree with the terminal empirical
+holdings, another symptom of the not-converged-at-cap caveat.
+
+### H5/H6 verdict
+
+**H5: partially confirmed — the model-contents gradient holds, the
+variant-pairing does not everywhere.** In every economy with a nonzero
+spread, gains order as q ≥ dyna-emp ≥ dyna-rules (B, D; ties on A1/C for
+some pairs), i.e. injecting the known rules into a *dumb* planner recovers
+most of what `muzero-known` gets from them — the attribution claim. But the
+strict pairings fail in three places: `dyna-rules` destabilizes late on A2
+(34.16 vs `muzero-known` 0), `dyna-emp` under-performs `muzero-emp` on B
+(2.89 vs 0), and over-performs it on C (0 vs 0.594). **H6: consistent** —
+`q` is worst or tied-worst in four of five economies with severe traps on
+B (7.22) and D (3.68), never beating the empirical PUCT learner beyond
+noise except C's 0.518 vs 0.594. All Stage-2 numbers carry the "capped at
+180 iterations, (D1) unmet" caveat; the extended-horizon check below tests
+which capped cells are sample-starved and which are genuinely settled.
