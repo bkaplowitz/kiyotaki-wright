@@ -217,6 +217,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--per-agent", action="store_true")
     parser.add_argument("--eps-floor", type=float, default=None)
     parser.add_argument("--kappa0", type=float, default=None)
+    parser.add_argument("--n-iters-max", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -233,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg = dataclasses.replace(cfg, eps_floor=args.eps_floor)
     if args.kappa0 is not None:
         cfg = dataclasses.replace(cfg, kappa0=args.kappa0)
+    if args.n_iters_max is not None:
+        cfg = dataclasses.replace(cfg, n_iters_max=args.n_iters_max)
 
     flags = resolve_ablation_flags(args.learner, args)
 
