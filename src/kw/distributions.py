@@ -46,7 +46,7 @@ def invariant(
     alpha: np.ndarray,
     beta: np.ndarray,
     tol: float = 1e-12,
-    max_iter: int = 200_000,
+    max_iter: int = 10_000_000,
 ) -> np.ndarray:
     """Fixed point of F_sigma via damped forward iteration from mu0.
 
