@@ -130,7 +130,8 @@ class QLearner:
     ) -> None:
         if per_agent:
             raise NotImplementedError(
-                "per_agent banks need an agent id, absent from the trade/cons action protocol"
+                "per_agent Q/model banks are out of scope for the Q-learning baseline; "
+                "extension E2 runs muzero-emp only (extensions/architecture.md section 6)"
             )
         if dyna not in ("none", "emp", "rules"):
             raise ValueError(f"dyna={dyna!r} must be one of 'none', 'emp', 'rules'")
@@ -181,15 +182,18 @@ class QLearner:
         ] = {}
         self._alpha_prev, self._beta_prev = self._greedy_alpha_beta()
 
-    def observe_meeting(self, i: int, j_good: int) -> None:
+    def observe_meeting(self, i: int, j_good: int, agent: int = 0) -> None:
         """Feeds `m_hat` for `dyna != "none"`; otherwise a no-op, since this
         learner's pending-transition bookkeeping is driven by
-        `observe_meeting_agent` instead (see the module docstring)."""
+        `observe_meeting_agent` instead (see the module docstring). The
+        protocol's `agent` id is accepted and ignored (shared tables)."""
         if self.dyna != "none":
             self.model.observe_meeting(i, j_good)
             self._kernel_cache.clear()
 
-    def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int:
+    def trade_action(
+        self, i: int, k: int, j: int, rng: np.random.Generator, agent: int = 0
+    ) -> int:
         if k == j:
             return 0
         self._trade_visited.add((i, k, j))
@@ -200,7 +204,7 @@ class QLearner:
             return int(rng.integers(0, 2))
         return int(self.QT[i, k, j, 1] > self.QT[i, k, j, 0])
 
-    def cons_action(self, i: int, h: int, rng: np.random.Generator) -> int:
+    def cons_action(self, i: int, h: int, rng: np.random.Generator, agent: int = 0) -> int:
         self._cons_visited.add((i, h))
         if self.dyna != "none" and (i, h) not in self._dyna_cons_seen:
             self._dyna_cons_seen.add((i, h))

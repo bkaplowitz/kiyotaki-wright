@@ -10,13 +10,13 @@ class RandomLearner:
     def __init__(self, econ, rng):
         self.econ, self.rng = econ, rng
 
-    def trade_action(self, i, k, j, rng):
+    def trade_action(self, i, k, j, rng, agent=0):
         return int(rng.random() < 0.5) if k != j else 0
 
-    def cons_action(self, i, h, rng):
+    def cons_action(self, i, h, rng, agent=0):
         return int(self.econ.gamma_feasible[i, h] and rng.random() < 0.5)
 
-    def observe_meeting(self, i, j_good):
+    def observe_meeting(self, i, j_good, agent=0):
         pass
 
     def observe_trade(self, rec):

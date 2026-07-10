@@ -73,13 +73,20 @@ class Learner(Protocol):
     bookkeeping, and its deployment policy.
     """
 
-    def observe_meeting(self, i: int, j_good: int) -> None:
-        """Own type `i` saw a matched partner holding `j_good`, before trade_action (Alg 3 l.5)."""
+    def observe_meeting(self, i: int, j_good: int, agent: int = 0) -> None:
+        """Own type `i` saw a matched partner holding `j_good`, before trade_action (Alg 3 l.5).
+
+        `agent` is the true simulator agent id (Task 18, extension E2): the
+        harness always passes it so per-agent learners can route observations
+        and action queries to private model banks; shared learners ignore it.
+        """
         ...
 
-    def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int: ...
+    def trade_action(
+        self, i: int, k: int, j: int, rng: np.random.Generator, agent: int = 0
+    ) -> int: ...
 
-    def cons_action(self, i: int, h: int, rng: np.random.Generator) -> int: ...
+    def cons_action(self, i: int, h: int, rng: np.random.Generator, agent: int = 0) -> int: ...
 
     def observe_trade(self, rec: TradeRecord) -> None: ...
 

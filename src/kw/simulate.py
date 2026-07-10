@@ -30,6 +30,13 @@ extension (Task 15) uses it to complete a consumption-stage TD update that
 had to be deferred at `observe_cons` time until the next meeting reveals
 the bootstrap good j'.
 
+Every `observe_meeting`/`trade_action`/`cons_action` call also passes the true
+agent id as the keyword `agent` (Task 18, extension E2): per-agent learners
+route observations and planner queries to private model banks by that id,
+while shared learners accept and ignore it (the protocol default is 0). The
+ids are the simulator's own agent indices in [0, n_agents), never re-derived
+or wrapped.
+
 RNG discipline (§12.2): `run_learning` builds exactly one
 `np.random.default_rng(seed)`, used both for the per-round matching
 permutation and passed through as the `rng` argument to every
@@ -134,15 +141,15 @@ def _run_trade_round(
         i_a, i_b = int(types[a]), int(types[b])
         h_a, h_b = int(holdings[a]), int(holdings[b])
 
-        learner.observe_meeting(i_a, h_b)
-        learner.observe_meeting(i_b, h_a)
+        learner.observe_meeting(i_a, h_b, agent=a)
+        learner.observe_meeting(i_b, h_a, agent=b)
 
         if hasattr(learner, "observe_meeting_agent"):
             learner.observe_meeting_agent(agent=a, i=i_a, k=h_a, j_good=h_b)
             learner.observe_meeting_agent(agent=b, i=i_b, k=h_b, j_good=h_a)
 
-        lam_a = learner.trade_action(i_a, h_a, h_b, rng)
-        lam_b = learner.trade_action(i_b, h_b, h_a, rng)
+        lam_a = learner.trade_action(i_a, h_a, h_b, rng, agent=a)
+        lam_b = learner.trade_action(i_b, h_b, h_a, rng, agent=b)
         new_h_a, new_h_b = trade_outcome(h_a, h_b, lam_a, lam_b)
         if new_h_a != h_a:
             exchanges += 1
@@ -169,7 +176,7 @@ def _run_cons_round(
     n_agents = types.shape[0]
     for a in range(n_agents):
         i_a, h_a = int(types[a]), int(holdings[a])
-        gamma = learner.cons_action(i_a, h_a, rng)
+        gamma = learner.cons_action(i_a, h_a, rng, agent=a)
         if gamma == 1 and not econ.gamma_feasible[i_a, h_a]:
             raise ValueError(
                 f"cons_action returned gamma=1 at gamma-infeasible (i={i_a}, h={h_a})"

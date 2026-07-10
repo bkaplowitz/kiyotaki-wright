@@ -108,14 +108,16 @@ class _SnapshotDelegate:
         if hasattr(learner, "observe_meeting_agent"):
             self.observe_meeting_agent = learner.observe_meeting_agent
 
-    def observe_meeting(self, i: int, j_good: int) -> None:
-        self.learner.observe_meeting(i, j_good)
+    def observe_meeting(self, i: int, j_good: int, agent: int = 0) -> None:
+        self.learner.observe_meeting(i, j_good, agent=agent)
 
-    def trade_action(self, i: int, k: int, j: int, rng: np.random.Generator) -> int:
-        return self.learner.trade_action(i, k, j, rng)
+    def trade_action(
+        self, i: int, k: int, j: int, rng: np.random.Generator, agent: int = 0
+    ) -> int:
+        return self.learner.trade_action(i, k, j, rng, agent=agent)
 
-    def cons_action(self, i: int, h: int, rng: np.random.Generator) -> int:
-        return self.learner.cons_action(i, h, rng)
+    def cons_action(self, i: int, h: int, rng: np.random.Generator, agent: int = 0) -> int:
+        return self.learner.cons_action(i, h, rng, agent=agent)
 
     def observe_trade(self, rec) -> None:
         self.learner.observe_trade(rec)
