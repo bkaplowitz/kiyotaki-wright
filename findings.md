@@ -775,14 +775,21 @@ holdings, another symptom of the not-converged-at-cap caveat.
 
 ### H5/H6 verdict
 
-**H5: partially confirmed — the model-contents gradient holds, the
-variant-pairing does not everywhere.** In every economy with a nonzero
-spread, gains order as q ≥ dyna-emp ≥ dyna-rules (B, D; ties on A1/C for
-some pairs), i.e. injecting the known rules into a *dumb* planner recovers
-most of what `muzero-known` gets from them — the attribution claim. But the
-strict pairings fail in three places: `dyna-rules` destabilizes late on A2
-(34.16 vs `muzero-known` 0), `dyna-emp` under-performs `muzero-emp` on B
-(2.89 vs 0), and over-performs it on C (0 vs 0.594). **H6: consistent** —
+**H5: partially confirmed — the model-contents gradient holds on B and D
+only, and is violated outright on A2 and on C's emp/rules pair.** On B and
+D gains order as q ≥ dyna-emp ≥ dyna-rules (B: 7.22 ≥ 2.89 ≥ 0.0; D:
+3.68 ≥ 0.863 ≥ 0.0928), i.e. injecting the known rules into a *dumb*
+planner recovers most of what `muzero-known` gets from them — the
+attribution claim, where it holds. A1 is uninformative (all five learners
+at machine-zero gain). Elsewhere the gradient itself is violated, not
+merely the muzero pairings: A2 — the grid's largest spread — orders the
+*opposite* way, with `dyna-rules` posting the grid's worst gain (34.16)
+while `q` sits at 1.14e-13; and C's emp/rules pair is a strict reversal,
+not a tie (`dyna-emp` 0.0 vs `dyna-rules` 0.518). The strict muzero
+pairings additionally fail in three places: `dyna-rules` destabilizes late
+on A2 (34.16 vs `muzero-known` 0), `dyna-emp` under-performs `muzero-emp`
+on B (2.89 vs 0), and over-performs it on C (0 vs 0.594). **H6:
+consistent** —
 `q` is worst or tied-worst in four of five economies with severe traps on
 B (7.22) and D (3.68), never beating the empirical PUCT learner beyond
 noise except C's 0.518 vs 0.594. All Stage-2 numbers carry the "capped at
