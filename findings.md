@@ -788,3 +788,127 @@ B (7.22) and D (3.68), never beating the empirical PUCT learner beyond
 noise except C's 0.518 vs 0.594. All Stage-2 numbers carry the "capped at
 180 iterations, (D1) unmet" caveat; the extended-horizon check below tests
 which capped cells are sample-starved and which are genuinely settled.
+
+### Extended-horizon check (sample-starvation hypothesis)
+
+**Hypothesis under test: the trapped Stage-2 cells (final deployment
+`br_gain > 1e-6` at the 180-iteration cap) are merely sample-starved — more
+iterations would close the gap — rather than settled in a genuine trap.**
+Three probes, all anchored to the seed-0 artifacts: (1) a nan-aware tail
+analysis of each cell's per-iteration `br_gain_series` (final finite value
+vs the finite value ~50 iterations earlier); (2) for the dyna cells, the
+`diagnostics.sce_certificate` of the final learned beliefs (m̂, q̂) against
+the deployment policy — subjective gap `s ≈ 0` with objective
+`br_gain > 0` is the self-confirming-trap signature; (3) extended re-runs
+*only* for cells whose tail was materially declining (dyna at cap 360, `q`
+at cap 720), written to separate out dirs so the primary grid artifacts are
+untouched. Eight cells qualify.
+
+Tail analysis (artifact-exact):
+
+| cell | gain @ iter 129 | gain @ iter 179 | tail-50 min/max | verdict |
+|---|---|---|---|---|
+| B/q | 7.22222 | 7.22222 | 0 / 33.3333 | plateaued (oscillating) |
+| C/q | 7.32918 | 0.517958 | 0 / 11.2709 | declining |
+| D/q | 6.95455 | 3.67678 | 1.17953 / 72 | declining |
+| B/dyna-emp | 2.88889 | 2.88889 | 0 / 4.25463 | plateaued (oscillating) |
+| D/dyna-emp | 10.446 | 0.862965 | 1.49e-13 / 17.3245 | declining |
+| A2/dyna-rules | 6.16751e-12 | 34.1605 | 6.17e-12 / 34.1605 | rising |
+| C/dyna-rules | 0.0 | 0.517958 | 0 / 0.517958 | rising |
+| D/dyna-rules | 9.75025 | 0.092762 | 0.092762 / 20.9886 | declining |
+
+The two *rising* cells deserve emphasis: A2/dyna-rules sat at machine-zero
+gain through iteration ~129 and then *left* — more data made it worse, the
+opposite signature of sample starvation (and an echo of the paper's own A2
+instability, gain ≈ 21). Rising and plateaued cells were not extended per
+the declining-only rule; they get the certificate diagnostic instead.
+
+**SCE certificates.** The run artifacts do not persist the learner's belief
+state, so each qualifying dyna cell was replayed in-process
+(`QLearner(econ, LearnerConfig(), np.random.default_rng(0), dyna=...)` +
+`kw.simulate.run_learning(..., seed=0)`; the CLI's diagnostics all run
+*after* the simulation, so the replay is trajectory-identical), and
+faithfulness was proven per cell by `np.array_equal` on
+`alpha_star`/`beta_star`/`mu_star` against the saved `arrays.npz` — all
+five cells byte-identical. `sce_certificate` inputs: `m̂ = model.m_hat()`;
+for rules cells `q̂ = model.q_hat()` (the pooled acceptance belief the
+`RulesBackend` actually plans with); emp cells never feed `observe_offer`,
+so their pooled `q̂` sits at the uninformative 0.5 prior — both that
+literal prior and the *implied* acceptance belief embedded in the learned
+transition kernel, `q̃[i,k,j] = p_trade[i,k,j,λ=1,h′=j]`, are reported.
+`mu = mu_star` from the artifacts.
+
+| cell | objective br_gain | subjective gap s | on-path belief error b |
+|---|---|---|---|
+| A2/dyna-rules | 34.1605 | 1.10e-11 | 0.5028 |
+| C/dyna-rules | 0.517958 | 0.0 | 0.2156 |
+| D/dyna-rules | 0.092762 | 1.14e-11 | 0.2444 |
+| D/dyna-emp | 0.862965 | 1.16e-11 (implied q̃; 0.941 under the literal 0.5 prior) | 0.4475 |
+| B/dyna-emp | 2.88889 | 1.856 (implied q̃; 2.042 prior) | 0.537 |
+
+Four of the five trapped dyna cells are *subjectively optimal* — `s ≈ 0`
+to eleven digits — against their own learned beliefs while objectively
+suboptimal by 0.09–34: the approximate self-confirming-trap signature.
+This is a finding, not a bug: planning amplifies belief errors into
+confidently-held wrong policies. The large on-path belief error `b`
+(0.22–0.50, far above `classify_run`'s strict 0.02 SCE threshold) locates
+the mechanism: `q̂` aggregates acceptance behavior over the entire
+ε-greedy *training* history, so it is consistent with the data the learner
+generated but wrong under the deployed policy — beliefs confirmed by
+history rather than by the equilibrium path (so formally these classify as
+UNSETTLED, not certified SCE_TRAP). The exception, B/dyna-emp
+(`s ≈ 1.9` under both belief readings), is *not* belief-certified: its
+Q-table never reached its own model's optimum, matching its oscillating
+tail — an unsettled-optimization failure, not a belief trap. Caveat for
+the emp cells: the certificate's subjective MDP is parameterized by
+(m̂, q̃) under the true mechanics, whereas the emp planner backs up through
+the raw learned `p_trade` (including its smoothing mass on physically
+impossible transitions), so `s` for emp cells is measured against the
+closest (m, q)-factored reading of its model, not its literal internals.
+
+**Extended runs** (`--n-iters-max` override, new orthogonal CLI flag;
+distinct out dirs; determinism verified — each extended run's
+`br_gain_series` first 180 entries are exactly equal to its primary run's,
+as expected since `n_iters_max` appears only as the loop bound):
+
+```bash
+uv run python scripts/run_learning.py --economy C --learner q --seed 0 \
+  --n-iters-max 720 --out runs/C/q/0-ext720          # and likewise D/q
+uv run python scripts/run_learning.py --economy D --learner dyna-emp --seed 0 \
+  --n-iters-max 360 --out runs/D/dyna-emp/0-ext360   # and likewise dyna-rules
+```
+
+| cell | cap | gain @ 180 (primary) | gain @ extended cap | converged (D1) | sample-starved? |
+|---|---|---|---|---|---|
+| C/q | 720 | 0.517958 | 0.517958 | False | no — identical value; the late-window decline bottomed out at the same trap |
+| D/q | 720 | 3.67678 | 3.05057 | False | largely no — 17% lower after 4× horizon, still order-1, tail wobbling (2.877 at iter 670) |
+| D/dyna-emp | 360 | 0.862965 | 0.271048 | False | partially at best — endpoint 69% lower, but the series hit 8.89757 at iter 310: swinging over an order of magnitude within the last 50 iterations, oscillating rather than converging |
+| D/dyna-rules | 360 | 0.092762 | 0.843137 | False | no — 9× *worse*; 0.233626 at iter 310 and rising, with the gap moving to different types (type 4: 0.843, type 1: 0.599) and a different aggregate |
+
+### Extended-horizon verdict
+
+**Sample starvation is rejected as the explanation for the trapped
+cells.** No extended run met (D1) even at 2–4× the horizon, and no cell
+closed its gap: C/q reproduced its 0.517958 trap to six digits at 720
+iterations; D/q shaved 17% and stalled at order-1; D/dyna-emp's endpoint
+fell to 0.271048 but its tail still swings between 0.27 and 8.9;
+D/dyna-rules got 9× worse. What the three probes show instead is three
+distinct failure modes. (i) *Belief-anchored self-confirming traps*: four
+of five trapped dyna cells (A2/dyna-rules, C/dyna-rules, D/dyna-rules,
+D/dyna-emp) deploy policies that are exactly optimal (`s ≈ 1e-11`) against
+learned beliefs whose on-path acceptance error is 0.22–0.50 — more
+same-policy data cannot fix a gap the learner cannot subjectively see; this
+is the headline mechanism, and it is what Dyna planning *adds*: it
+transmits belief error into locked-in policy with high confidence. (ii)
+*Late-horizon instability of the rules-backend cells*: A2/dyna-rules left a
+machine-zero-gain point after iteration ~129, and D/dyna-rules worsened
+0.0928 → 0.8431 between caps 180 and 360 — the paper's A2 instability
+signature, now seen twice. (iii) *Unsettled oscillation*: B/q, B/dyna-emp
+(the one dyna cell whose plateau is not belief-certified, `s ≈ 1.9`), D/q,
+and D/dyna-emp all oscillate without settling — a Q-learning convergence
+failure at these hyperparameters, not a data-quantity problem. All
+extended-run artifacts live beside the primary grid
+(`runs/C/q/0-ext720`, `runs/D/q/0-ext720`, `runs/D/dyna-emp/0-ext360`,
+`runs/D/dyna-rules/0-ext360`); every extended run's first-180
+`br_gain_series` entries equal its primary run's exactly, confirming the
+same-seed replay premise.
