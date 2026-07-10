@@ -148,7 +148,7 @@ def rvi_solve(
     agg: np.ndarray,
     Q: np.ndarray,
     tol: float = 1e-10,
-    max_iter: int = 200_000,
+    max_iter: int = 10_000_000,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Optimal gain, bias V (V[f[i]] = 0), and W for type i under (agg, Q)."""
     return _run_rvi(
@@ -168,7 +168,7 @@ def rvi_solve_subjective(
     m_i: np.ndarray,
     q_i: np.ndarray,
     tol: float = 1e-10,
-    max_iter: int = 200_000,
+    max_iter: int = 10_000_000,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Subjective RVI under type i's own beliefs (m_i, q_i), kernel T_q (S2)-(S3)."""
     return _run_rvi(
@@ -235,7 +235,7 @@ def policy_eval(
     agg: np.ndarray,
     Q: np.ndarray,
     tol: float = 1e-10,
-    max_iter: int = 200_000,
+    max_iter: int = 10_000_000,
 ) -> tuple[float, np.ndarray]:
     """Gain and bias of fixed (alpha_i, beta_i): RVI on the sigma-averaged operator."""
     _check_policy_feasible(econ, i, alpha_i, beta_i, "policy_eval")
@@ -259,7 +259,7 @@ def policy_eval_subjective(
     m_i: np.ndarray,
     q_i: np.ndarray,
     tol: float = 1e-10,
-    max_iter: int = 200_000,
+    max_iter: int = 10_000_000,
 ) -> tuple[float, np.ndarray]:
     """Fixed-policy gain and bias under type i's own beliefs (m_i, q_i)."""
     _check_policy_feasible(econ, i, alpha_i, beta_i, "policy_eval_subjective")
