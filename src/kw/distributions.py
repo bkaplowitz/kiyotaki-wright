@@ -46,7 +46,7 @@ def invariant(
     alpha: np.ndarray,
     beta: np.ndarray,
     tol: float = 1e-12,
-    max_iter: int = 10_000_000,
+    max_iter: int = 40_000_000,
 ) -> np.ndarray:
     """Fixed point of F_sigma via damped forward iteration from mu0.
 
@@ -55,6 +55,13 @@ def invariant(
     oscillation between iterates rather than monotone convergence), damping
     kicks in: mu_{n+1} = 0.5*mu_n + 0.5*F_sigma(mu_n). Raises RuntimeError if
     max_iter is exhausted without reaching tol.
+
+    The default cap is sized for near-deterministic learned policies whose
+    damped map contracts with spectral gap ~1e-6 per iteration (measured
+    ~11.1M iterations to tol on extension E3's slowest economy-C cell);
+    3.6x that measured need. Converged calls stop on the tolerance test,
+    never the cap, so raising it cannot change any previously converged
+    result.
     """
     mu = mu0.copy()
     prev_residual = np.inf
