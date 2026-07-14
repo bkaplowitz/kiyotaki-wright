@@ -43,7 +43,15 @@ permutation and passed through as the `rng` argument to every
 `learner.trade_action` / `learner.cons_action` call, so a run is fully
 reproduced by (econ, learner state machine, cfg, seed). Matched pairs are
 processed in draw order (perm[2m], perm[2m+1]) and both agents' trade records
-are appended online in that same order.
+are appended online in that same order. One documented deviation, retained
+deliberately: the learner's construction-time generator (the driver script
+`scripts/run_learning.py` builds a second `np.random.default_rng(seed)` for
+the learner itself, distinct from this function's generator) and this
+simulation stream are separate generators seeded with the same integer,
+rather than named child streams from `default_rng(seed).spawn()`.
+Bit-identical reproducibility of every committed run artifact depends on this
+exact construction, so it must not change; fresh future run-sets should
+prefer `spawn()`-derived streams.
 
 Stopping rule (D1): paper Algorithm 4 line 7 breaks at the first 0-based
 iteration n with n >= n_min + p - 1 whose last p deltas all satisfy

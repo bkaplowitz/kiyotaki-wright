@@ -321,10 +321,14 @@ enable an unbundled 2³ ablation is an extension (`extensions/architecture.md`
 | `greedy_backup` | prior-weighted (L2)–(L3) | greedy interior backup |
 | `centered_values` | v ← (1−ζ)v + ζ V̄ | v ← (1−ζ)v + ζ(V̄ − V̄(k_ref)), v(k_ref)=0 |
 
-Iteration loop (Algorithm 3): R rounds of {uniform random pairing → meeting
-counts → PUCT_T at both roots → sample offers → exchange iff both offer and
-k≠j → records online} then a population-wide consumption pass (PUCT_C, sample,
-physical transition, record). End of iteration (Algorithm 4): root-wise mean
+Iteration loop (Algorithm 3): R rounds, each of {uniform random pairing →
+meeting counts → PUCT_T at both roots → sample offers → exchange iff both
+offer and k≠j → records online → that round's population-wide consumption
+pass (PUCT_C, sample, physical transition, record)}. The consumption pass is
+nested inside every round, not hoisted to once per iteration — the (B3)–(B4)
+kernel alternates a trade stage and a consumption stage within a single
+period (see `simulate.py`'s module docstring for why the hoisted reading is
+inconsistent). End of iteration (Algorithm 4): root-wise mean
 visit policies π̄ and mean max-values V̄ (unvisited roots keep current values);
 updates `α ← clip_ε[(1−ζ_n)α + ζ_n π̄]`, same for β, v; ζ_n = max(0.01,
 0.45·0.94ⁿ); clip_ε projects onto [ε, 1−ε] (0 for infeasible actions).
@@ -353,13 +357,36 @@ without modifying any module in this document.
 
 ```python
 class Learner(Protocol):
-    def trade_action(self, i, k, j, rng) -> int
-    def cons_action(self, i, h, rng) -> int
+    def observe_meeting(self, i: int, j_good: int, agent: int = 0) -> None
+    def trade_action(
+        self, i: int, k: int, j: int, rng: np.random.Generator, agent: int = 0
+    ) -> int
+    def cons_action(self, i: int, h: int, rng: np.random.Generator, agent: int = 0) -> int
     def observe_trade(self, rec: TradeRecord) -> None
     def observe_cons(self, rec: ConsRecord) -> None
     def end_iteration(self, n: int) -> float        # returns Δ̄_n for (D1)
     def deployment_policy(self) -> tuple[np.ndarray, np.ndarray]  # (alpha*, beta*)
 ```
+
+`observe_meeting(i, j_good, agent=)` is called for both agents of every
+meeting, before either agent's `trade_action` (Algorithm 3 line 5). The
+`agent` keyword on `observe_meeting`/`trade_action`/`cons_action` is the true
+simulator agent id in [0, n_agents), threaded by `simulate.py` on every call
+(extension E2): per-agent learners route observations and action queries to
+private model banks by that id; shared learners accept and ignore it (protocol
+default 0). Learners may additionally define an *optional* hook
+
+```python
+    def observe_meeting_agent(self, agent: int, i: int, k: int, j_good: int) -> None
+```
+
+which `_run_trade_round` invokes for both agents of every meeting (before
+either `trade_action`), guarded by `hasattr` so learners that don't define it
+are unaffected; the Stage-2 differential Q-learner uses it to complete a
+consumption-stage TD update deferred until the next meeting reveals the
+bootstrap good. Wrappers must preserve `hasattr` visibility — see
+`_SnapshotDelegate` in `scripts/run_learning.py`, which conditionally binds
+the attribute only when the wrapped learner defines it.
 
 `simulate.py` owns everything else — population init, matching, trade
 resolution, stopping rule, deployment extraction, fixed-policy evaluation (120

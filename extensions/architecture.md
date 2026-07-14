@@ -106,9 +106,11 @@ fiat-acceptance data never arrives regardless of averaging).
 ### 5.2 E2 — per-agent vs population-shared tables
 
 Core hook: `ModelBank(n_banks)` — default one shared bank (paper); extension
-sets one bank per agent (memory trivial: ≤1800 × a few KB) for both the model
-and the policy/value tables. Tests whether experience pooling causes or merely
-accelerates the observed outcomes (H8).
+sets one bank per agent (memory trivial: ≤1800 × a few KB) for the empirical
+*model only* — the policy/value tables (α, β, v) remain population-shared
+(the ratified `MuZeroLearner` interface, plan.md Task 12). Tests whether
+experience pooling in the world-model causes or merely accelerates the
+observed outcomes (H8).
 
 ### 5.3 E3 — exploration sweep
 

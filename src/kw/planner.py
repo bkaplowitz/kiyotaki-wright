@@ -107,10 +107,12 @@ class RulesBackend:
       p_cons(i)[h,gamma] = onehot(next_holding_cons[i,h,gamma]);
       r_trade(i) == 0;  r_cons(i) = reward_cons_table[i], -inf -> LARGE_NEG.
 
-    m-hat and q-hat are type-independent (pooled over offerer type), so the
-    per-type methods return the same kernel for every i. The consumption and
-    reward kernels are precomputed once; the trade kernel is rebuilt per query
-    because q-hat moves as play accumulates.
+    Only q-hat is pooled over offerer type, so `p_trade(i)` — and trivially
+    the all-zero `r_trade(i)` — return the same kernel for every i. The other
+    methods are type-dependent: `m(i)` slices the (I,G) m-hat estimate, and
+    `p_cons(i)` / `r_cons(i)` index the per-type consumption/production rules.
+    The consumption and reward kernels are precomputed once; the trade kernel
+    is rebuilt per query because q-hat moves as play accumulates.
     """
 
     def __init__(self, econ: Economy, model: EmpiricalModel) -> None:

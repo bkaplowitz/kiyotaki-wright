@@ -1107,7 +1107,7 @@ seeds 0–2, muzero-emp (default cell is eps0.03-k2). Deployment
 
 **H9 (C's collapse is structural, not exploration-limited) —
 confirmed.** No cell in the 4×3×3 grid restores the fiat links: the
-grid minimum is 0.5174 (eps0.01, seeds 1 at k0.5/k2) — the same
+grid minimum is 0.5174 (eps0.01, seed 1 at k0.5/k2) — the same
 0.52-band trap — and both directions away from the default ε=0.03 are
 monotonically bad. Larger ε strictly hurts: at ε=0.1 the best seeds sit
 at 1.42–1.44 (the ε-floor's own exploration cost is already first-order
