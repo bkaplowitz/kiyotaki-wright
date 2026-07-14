@@ -921,3 +921,307 @@ extended-run artifacts live beside the primary grid
 `runs/D/dyna-rules/0-ext360`); every extended run's first-180
 `br_gain_series` entries equal its primary run's exactly, confirming the
 same-seed replay premise.
+
+## Extensions grid (Task 18: 2³ ablation, E1–E3, decay addendum)
+
+**Verdicts for the H4 flag attribution (ext §3) and H7/H8/H9 (ext §5),
+plus the decay addendum (ext-runner docstring, addendum A), from the
+169-cell extensions grid.**
+
+Reproduce with:
+
+```bash
+uv run python scripts/run_extensions.py --jobs 8 --out runs/extensions
+```
+
+Artifacts under `runs/extensions/<arm>/<econ>/<cell>/<seed>/`, one summary
+record per cell in `runs/extensions/summary.json` (169 records: ablation
+16, e1 30, e2 15, e3 36, decay 72). All cells completed (driver rc=0);
+every muzero cell stopped D1-converged at `n_iters=108` (the H3
+ζ-schedule clock); decay cells are q/dyna learners and hit the
+`n_iters_max=180` cap except the seven noted below. Reading notes that
+apply grid-wide:
+
+- **Headline: all 169 cells classify UNSETTLED** under the core §8
+  classifier (`NASH` iff `br_gain <= 0.05` **and** `stationarity <=
+  1e-3`) — no extension arm reaches the NASH classification anywhere,
+  against 3/100 NASH in the replication campaign
+  (`runs/campaign-replication/summary.json`) and 0/150 in the Stage-2
+  campaign (`runs/campaign-extensions/summary.json`). As in H4, the
+  stationarity leg is a finite-N `O(1/sqrt(1800)) ≈ 0.024` histogram
+  floor for mixed-holdings equilibria, so several cells below reach
+  `br_gain = 0.0` exactly yet still classify UNSETTLED; the informative
+  cross-cell signal in this grid is `br_gain`.
+- Six e3 cells (`eps0.1-{k0.5,k2,k8}` seeds {0,2}) had their deployment
+  `br_gain` recomputed post-hoc from the saved deployment policies
+  (`arrays.npz`) after the RVI iteration-cap raises (commits `aeee24e`,
+  `bf1688a`); each carries a `br_gain_recompute` provenance block in its
+  `trace.json`. The recompute is a deterministic function of the saved
+  arrays — no rerun.
+- `br_gain_series` aggregation is nan-aware throughout: 8 decay q-cells
+  carry 22 per-snapshot cap-type RVI `nan` holes (snapshot policies are
+  not persisted, so these are not recomputable); every *deployment*
+  `br_gain` in the grid is finite.
+
+### 2³ ablation — H4 flag attribution
+
+Full `{known_rules, greedy_backup, centered_values} ∈ {0,1}³` grid on C
+and D, seed 0, muzero-emp base. Deployment `br_gain`:
+
+| kr | gb | cv | C | D |
+|---|---|---|---|---|
+| 0 | 0 | 0 | 0.594160 | 0.626035 |
+| 0 | 0 | 1 | 0.594160 | 0.626035 |
+| 0 | 1 | 0 | 0.0 | 0.543806 |
+| 0 | 1 | 1 | 0.0 | 0.543806 |
+| 1 | 0 | 0 | 0.517784 | 0.270960 |
+| 1 | 0 | 1 | 0.517784 | 0.270960 |
+| 1 | 1 | 0 | 0.0 | 3.44e-11 |
+| 1 | 1 | 1 | 0.0 | 0.020175 |
+
+Corner sanity: the all-off corners equal the H3 seed-0 baselines to the
+last digit (C 0.5941598738745393, D 0.6260347618409483) and the all-on
+corners equal the H4 `muzero-known` values (C 0.0, D 0.0201752), so the
+flag plumbing is byte-consistent with the replication artifacts.
+
+**Attribution — the rescue carrier differs by economy, contradicting ext
+§3's prior expectation that `known_rules` dominates:**
+
+- **C: `greedy_backup` alone carries the entire rescue.** Every gb=1
+  cell has `br_gain = 0.0` exactly, with or without the known rules, and
+  the empirical terminal holdings of `kr0-gb1-cv0` sit on the H1 C-money
+  fiat SNE (per-type within finite-N noise of Fig. 8: T1 [0.272, –,
+  0.728, –], T2 [0.303, 0.272, –, 0.425], T3 [0.385, 0.615, –, –]).
+  `known_rules` alone only nudges C from 0.5942 to 0.5178 — the same
+  0.52-band trap value the Stage-2 C/q and C/dyna-rules cells sit at
+  (0.517958). Switching the planner's backup operator from average to
+  max — with the *empirical* model unchanged — is what closes C's gap.
+- **D: the `known_rules × greedy_backup` interaction carries it.**
+  Neither flag alone suffices (gb: 0.626→0.544; kr: 0.626→0.271); both
+  together reach 3.44e-11, landing on the H1 D commodity-money SNE
+  (T1 [–, 0.103, 0.897, –, –], T2 [0.719, –, 0.075, 0.206, –], T4
+  [1.0], T5 [0.8, 0.2]).
+- **`centered_values` is inert outside the full stack — byte-identical
+  artifacts.** In six of the eight cv0/cv1 pairs (every pair with kr=0
+  or gb=0) the *entire* `arrays.npz` is byte-identical
+  (`np.array_equal` on all arrays): flipping cv changed no decision on
+  the whole trajectory. Only inside kr1-gb1 does cv do anything, and
+  there it is mildly harmful on D (3.44e-11 → 0.020175, the H4
+  residual) and payoff-neutral on C (0.0 → 0.0 with a slightly
+  different endpoint).
+
+All 16 cells `converged=True` at `n_iters=108` and all classify
+UNSETTLED (the zero-gain cells via the finite-N stationarity floor), so
+the brief's spot-re-seed trigger (a cell whose *classification* differs
+from its neighbors) never fired; no re-seeds were run.
+
+### E1 — EMA/constant-gain empirical model (H7)
+
+`--ema-gain λg ∈ {0.005, 0.02, 0.05}` × {C, D} × seeds 0–4, muzero-emp.
+Deployment `br_gain` (5 seeds, sorted) against the 10-seed muzero-emp
+baselines from `runs/campaign-replication`:
+
+| cell | C | D |
+|---|---|---|
+| baseline (λg=0, 10 seeds) | min 0.0047, med 3.80, max 31.85 | min 0.2705, med 1.713, max 1.714 |
+| ema0.005 | 2.59, 16.4, 16.4, 16.7, 16.7 | 0.058, 0.270, 0.270, 0.270, 0.313 |
+| ema0.02 | 0.511, 0.514, 12.5, 14.7, 14.7 | 0.057, 0.313, 0.507, 1.70, 3.06 |
+| ema0.05 | 0.513, 0.514, 0.515, 0.515, 5.25 | 0.0018, 0.057, 0.058, 2.67, 3.97 |
+
+**H7 (paper §8 conjecture, prediction on record: rescues D, not C) —
+confirmed in direction at λg=0.005, with caveats at larger gains.**
+
+- **D's stale-anchor plateau disappears at λg=0.005.** Six of ten
+  baseline D seeds sit within 1e-3 of gain 1.714 (a seventh at 1.173) —
+  the stale-anchor plateau, incidentally the paper's own Table-2 D value
+  1.71. Under λg=0.005 no seed lands there: all five fall in
+  [0.058, 0.313], at or below the best baseline seed (0.2705). That is
+  precisely the conjectured mechanism — constant-gain forgetting
+  removes the stale anchors — though "rescue" means gains of 0.06–0.31,
+  not NASH classification (stationarity floor, above). At λg ∈ {0.02,
+  0.05} D turns bimodal: some seeds reach the grid's best D-empirical
+  values (0.0018, 0.057) while others destabilize past the baseline max
+  (3.06, 3.97) — too much forgetting trades the plateau for variance.
+- **C is never rescued, at any gain.** The best C cell across all 15 is
+  0.511 — the familiar 0.51–0.60 trap band — and λg=0.005 makes C
+  dramatically *worse* (16.4–16.7 on four of five seeds, versus
+  baseline median 3.80): slow forgetting starves the already-sparse
+  fiat-link counts faster than data replenishes them. The missing-data
+  mechanism (H7's "not C" clause) is exactly what faster averaging
+  cannot fix.
+
+### E2 — per-agent vs population-shared tables (H8)
+
+`--per-agent` × {A1, C, D} × seeds 0–4, muzero-emp. **Measurement
+caveat that governs every number in this subsection: the per-agent
+deployment artifact is the plain MEAN of the per-agent `pi_dep(1)`
+policies over each type's agents (`learners/muzero.py`,
+`deployment_policy`), NOT the policy of the mean model** — the
+diagnostics score the population's mixture policy, which is the
+population-level behavior under matching but is not any individual
+agent's policy. Deployment `br_gain` of that mean policy (5 seeds,
+sorted), against shared-table baselines:
+
+| econ | per-agent (mean of per-agent policies) | shared baseline (10 seeds) |
+|---|---|---|
+| A1 | 1.9e-6, 1.9e-6, 2.3e-6, 0.0053, 0.0058 | 5.05e-11 (all 10 seeds) |
+| C | 0.0046, 0.0062, 0.0077, 0.0095, 0.0124 | min 0.0047, med 3.80, max 31.85 |
+| D | 0.189, 0.216, 0.224, 0.293, 0.329 | min 0.2705, med 1.713, max 1.714 |
+
+**H8 ("population-shared tables are not the cause of the traps;
+per-agent learners land in the same attractor class, slower") — refuted
+as stated, at the population-mixture level.** Per-agent C does *not*
+land in the shared-table attractor class: every seed's mixture policy
+sits at gain 0.005–0.012, two to three-and-a-half orders of magnitude
+below the shared baseline on the same seeds (0.594–31.85), and per-agent
+D (0.19–0.33) sits at-or-below the best shared seed on every draw,
+never on the 1.714 plateau. Nor is "slower" observed: every per-agent
+cell D1-converges at the same `n_iters=108`. A1 moves the other way
+(machine-zero → 1.9e-6–0.0058, still small): heterogeneity costs a
+little where sharing was already optimal, and helps a lot where sharing
+trapped. The honest scope limit is the caveat above — these diagnostics
+certify the *population mixture* near-best-responds; whether individual
+agents are trapped is not measured by this artifact (per-agent tables
+are not persisted). Within that scope, experience pooling is implicated
+in — not exonerated of — the C trap severity. All 15 cells UNSETTLED
+(stationarity floor).
+
+### E3 — exploration sweep (H9)
+
+`--eps-floor ∈ {0.01, 0.03, 0.1, 0.2}` × `--kappa0 ∈ {0.5, 2, 8}` on C,
+seeds 0–2, muzero-emp (default cell is eps0.03-k2). Deployment
+`br_gain` by seed:
+
+| cell | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| eps0.01-k0.5 | 9.960 | 0.517 | 15.15 |
+| eps0.01-k2 | 9.960 | 0.517 | 15.15 |
+| eps0.01-k8 | 9.960 | 16.00 | 15.59 |
+| eps0.03-k0.5 | 0.594 | 11.29 | 8.851 |
+| eps0.03-k2 (default) | 0.594 | 11.29 | 0.596 |
+| eps0.03-k8 | 0.594 | 0.597 | 16.82 |
+| eps0.1-k0.5 | 1.4357 | 12.30 | 1.4238 |
+| eps0.1-k2 | 1.4357 | 12.30 | 1.4238 |
+| eps0.1-k8 | 1.4357 | 16.15 | 1.4358 |
+| eps0.2-(all κ0) | 17.3296 | 17.3296 | 17.3296 |
+
+**H9 (C's collapse is structural, not exploration-limited) —
+confirmed.** No cell in the 4×3×3 grid restores the fiat links: the
+grid minimum is 0.5174 (eps0.01, seeds 1 at k0.5/k2) — the same
+0.52-band trap — and both directions away from the default ε=0.03 are
+monotonically bad. Larger ε strictly hurts: at ε=0.1 the best seeds sit
+at 1.42–1.44 (the ε-floor's own exploration cost is already first-order
+in the gain), and at ε=0.2 **all nine cells collapse onto a single
+attractor with `br_gain = 17.3295719` identical to 10 significant
+digits across every κ0 and every seed** — exploration noise at that
+level erases both the prior and the matching-RNG seed from the outcome.
+Smaller ε (0.01) also hurts (9.96–16.0 on most seeds). Weaker or
+stronger priors do essentially nothing:
+
+- **κ0 shapes search, not the deployed greedy policy.** For k0.5 vs k2
+  (a 4× prior-strength change), the deployed policies are
+  **byte-identical** in 8 of 12 (ε, seed) pairs — all of eps0.01 and
+  eps0.1 plus eps0.03 seeds 0–1 (`np.array_equal` on
+  `alpha_star`/`beta_star`/`mu_star`; for the eps0.1 recomputed cells
+  the only non-equal array is the NaN-poisoned saved `br_gaps` vector,
+  and NaN ≠ NaN). At eps0.03 seed 0 the *training* tables differ at the
+  1e-3 level while the deployment extraction erases even that. The one
+  k0.5-vs-k2 divergence is eps0.03 seed 2 (8.851 vs 0.596) — a basin
+  flip, i.e. seed-lottery, not systematic improvement. k8 is never
+  byte-identical to the others but lands in the same gain bands
+  (e.g. eps0.1: 1.4357–1.4358 vs 1.4238–1.4357).
+
+The coordinated-experimentation argument stands: rebuilding C's
+multi-link reciprocal chain needs *joint* two-sided experimentation
+(~ε² per link per round), which no one-dimensional exploration knob
+supplies — turning ε up buys the links nothing before its own
+exploration cost dominates the deployed policy's neighborhood. All 36
+cells UNSETTLED.
+
+### Decay addendum — ε-decay and lr-decay on the stuck Stage-2 cells
+
+Both user hypotheses on record — (i) annealing exploration from a high
+start (`--eps-start 0.5`, decayed on the ζ schedule to the 0.03 floor)
+and (ii) Robbins–Monro-*style* per-visit learning-rate decay
+(`--q-lr-visit`: step `q_lr / sqrt(n_visits(cell))`) — applied
+separately and combined to the eight trapped Stage-2 cells (B,q)
+(B,dyna-emp) (C,q) (C,dyna-rules) (A2,dyna-rules) (D,q) (D,dyna-emp)
+(D,dyna-rules), seeds 0–2 = 72 cells. Framing note: `1/sqrt(n)` is
+*not* square-summable, so no classical Robbins–Monro convergence
+guarantee applies; the honest rationale is taming per-cell sampling
+noise under sparse visitation, and the observed rescues are consistent
+with exactly that (they occur where the Stage-2 failure was an
+oscillating plateau) rather than with any asymptotic-convergence story.
+Deployment `br_gain` (3 seeds, sorted) with the Stage-2 seed-0 baseline:
+
+| cell family | baseline | eps | lr | eps-lr |
+|---|---|---|---|---|
+| B/q | 7.222 | 1.5, 2.0, 8.06 | **0, 0, 0** | **0, 0, 0** |
+| B/dyna-emp | 2.889 | **0, 0, 0** | 0, 4.25, 4.25 | 0, 4.25, 4.25 |
+| C/q | 0.518 | 0, 0, 0.518 | 0, 0.518, 0.596 | 0, 0, 0.518 |
+| C/dyna-rules | 0.518 | 0.518 ×3 | 0, 0.518, 0.518 | 0, 0.518, 0.518 |
+| A2/dyna-rules | 34.16 | 6e-12, 34.16, 34.16 | 0, 21.44, 21.44 | 5e-12, 21.44, 21.44 |
+| D/q | 3.677 | 3.47, 5.46, 17.6 | 0.240, 0.251, 0.386 | 0.251, 0.314, 0.416 |
+| D/dyna-emp | 0.863 | 0.271, 1.22, 3.76 | 0.012, 2.89, 12.5 | 2.52, 2.59, 3.05 |
+| D/dyna-rules | 0.0928 | 0.271, 2.47, 3.62 | 0, 0.0058, 2.33 | 2.84, 3.05, 5.01 |
+
+**Verdict: neither schedule change (nor both) rescues Nash convergence
+for q or dyna on any economy — 0/72 NASH classifications — but the
+gain-level structure is informative and asymmetric:**
+
+- **lr-decay is the strongest single intervention observed, and it is
+  learner- and economy-specific.** It eliminates B/q's 7.22 trap on all
+  six lr-containing cells (`br_gain = 0.0` exactly) and produces the
+  **first (D1) convergences ever recorded for a Stage-2 learner**:
+  seven decay cells reach `converged=True` before the cap (B/q-eps-lr
+  seeds 0–2 at n=108/162/110, B/q-lr/2 at 111, C/q-lr seeds 0–1 at
+  144/171, C/q-eps-lr/2 at 144) — shrinking per-visit TD steps is what
+  lets the (D1) Δ̄ metric settle for hard-greedy Q policies. It also
+  tames D/q by an order of magnitude (3.68 → 0.24–0.42, never 0). But
+  it *hurts* B/dyna-emp (4.25 > 2.889 on four of six lr cells) and is
+  a lottery on D/dyna-emp (0.012 vs 12.5).
+- **ε-decay from 0.5 rescues exactly one family**: B/dyna-emp goes to
+  0.0 on all three seeds. Elsewhere it leaves traps in place (C/
+  dyna-rules 0.518 ×3), or actively destabilizes (D/q up to 17.6;
+  D/dyna-rules 0.093 → 0.27–3.62).
+- **A2/dyna-rules' late-destabilization pathology persists** under
+  every schedule: most cells land on 21.444 — the fundamental-branch
+  gain at ubar=500, the paper's own A2 Table-2 band (≈21.3) — or the
+  34.16 speculative-departure value, with occasional machine-zero
+  seeds (3 of 9 at ≤1e-11 or 0). Schedules reshuffle the basin lottery;
+  they do not close it.
+- **C remains a seed lottery under every schedule** (zeros on 7 of 18
+  C cells, the 0.518 trap on the rest): consistent with H9's
+  structural reading — the schedules change *when* exploration and
+  learning stop moving, not whether the fiat chain gets rebuilt.
+
+Overall: 20 of 72 decay cells reach `br_gain = 0.0` exactly (plus two
+at ≤1e-11), yet all 72 classify UNSETTLED via the stationarity floor,
+and no family is rescued on all seeds by any schedule except B/q under
+lr-decay and B/dyna-emp under ε-decay. The Stage-2 traps are therefore
+not artifacts of the constant-step/constant-ε defaults alone — the
+schedules move individual cells, but the trap phenomenology (seed
+lotteries, basin flips, late destabilization) survives both hypotheses.
+
+### Extensions verdict (headline)
+
+**All 169 extension cells classify UNSETTLED — no extension arm reaches
+the NASH classification anywhere** — matching the Stage-2 campaign's
+150/150 UNSETTLED (the replication campaign's 3/100 NASH remain the
+only NASH-classified runs in the project, all near-degenerate-holdings
+draws that beat the finite-N stationarity floor). Within that uniform
+classification the grid still resolves all four questions it was built
+for: the H4 rescue is carried by `greedy_backup` alone on C and by the
+`known_rules × greedy_backup` interaction on D, with `centered_values`
+byte-inert outside the full stack (ablation); the paper's §8 EMA
+conjecture H7 is confirmed in direction — λg=0.005 removes D's 1.714
+stale-anchor plateau and never helps C (E1); H8 is refuted as stated —
+per-agent learners' population-mixture policy lands orders of magnitude
+closer to best response on C, not in the same attractor class slower,
+with the mean-of-policies measurement caveat (E2); H9 is confirmed —
+C's collapse is structural, no (ε, κ0) combination restores the fiat
+links, ε=0.2 collapses all runs onto one 17.33-gain attractor, and κ0
+mostly does not even change the deployed policy bytes (E3); and the
+decay addendum shows schedule changes produce scattered exact-zero
+gains (20/72) and the first Stage-2 (D1) convergences without rescuing
+any cell family to NASH.
