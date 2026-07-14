@@ -1225,3 +1225,92 @@ mostly does not even change the deployed policy bytes (E3); and the
 decay addendum shows schedule changes produce scattered exact-zero
 gains (20/72) and the first Stage-2 (D1) convergences without rescuing
 any cell family to NASH.
+
+## Final verdict: H1–H9 with campaign tables and figures (Task 19)
+
+The tables and figures cited below are regenerated read-only from the three
+campaign summaries by `scripts/make_tables.py` (→ `reports/tables.md`, tables
+T1–T4) and `scripts/make_figures.py` (→ `reports/figures/*.png`). Both scripts
+fail loud (nonzero exit, naming every absent record) against the expected
+100 + 150 + 169 run set before emitting anything; the summaries carry no null
+br_gain/stationarity, so tables use plain (nan-safe) medians and figures carry
+nan-aware series only for the decay learning paths. Seed choices are fixed and
+disclosed in-figure: μ★ and learning paths at seed 0; the C trade-policy
+heatmap contrasts seed 0 (near-Nash) with seed 8 (trapped).
+
+**Headline.** `3/100` replication runs classify NASH vs `0/150` Stage-2 and
+`0/169` extensions (T2 totals; `outcome_frequency.png`) — the only NASH-class
+runs in the project. But this classification count *understates* the result:
+at the gain level (br_gain ≤ 0.05, ignoring stationarity) the same campaigns
+reach `71/100`, `74/150`, `41/169`. The gap is the finite-N stationarity floor
+(≈1/√1800 ≈ 0.024), not distance from Nash — every table and verdict reports
+both readings so the negative "0/169 NASH" is not read as "never near Nash".
+
+| H | Claim (abbrev.) | Verdict | Primary evidence |
+|---|---|---|---|
+| H1 | Algorithm 1 reproduces the KW/MMS stationary Nash equilibria | **Confirmed** | §H1 (verdict); Nash benchmark bars in `holdings_*.png` |
+| H2 | Algorithm 2 yields non-Nash SCEs (residuals ≈0, positive full-info gain) | **Confirmed** | §H2 (verdict); SCE bars in `holdings_A1/C/D.png` |
+| H3 | Fully empirical learner: A1/B→Nash, A2 gain≈21, C low-trade (broken fiat links), D plateau≈1.7 | **Confirmed (qualitative); C magnitude softer, classification blocked by finite-N floor** | T1/T2 muzero-emp rows; `learning_*.png`; `trade_policy_C.png` |
+| H4 | Known-environment learner reaches gain≈0 in all five economies | **Confirmed at gain level; NASH classification only on A1 (finite-N floor)** | T1/T2 muzero-known rows; §H4 |
+| H5 | Known-env rescue is from model contents, not planner (dyna-rules≈known, dyna-emp≈empirical) | **Refined / partly refuted — attribution is economy-dependent** | T4 ablation; T1/T3 Stage-2; §H5/H6 |
+| H6 | Model-free Q is at least as trap-prone as the empirical learner | **Confirmed** | T1/T2/T3 `q` rows |
+| H7 | EMA/constant-gain fixes D's plateau but not C's collapse | **Confirmed in direction** | T4 E1; §E1 |
+| H8 | Per-agent tables land in the same attractor class, slower | **Refuted as stated (mean-of-policies caveat)** | T4 E2; §E2 |
+| H9 | C's collapse is structural, not cured by moderate ε / weaker priors | **Confirmed** | T4 E3; §E3 |
+
+**H1, H2 (solver level).** Established in §H1/§H2 from the `nash_*`/`sce_*`
+benchmark runs, not the learner campaigns; here they anchor the learner figures
+as the black (Nash) and silver (SCE) bars in `holdings_*.png`, visibly distinct
+attractors (e.g. C's SCE-low-trade hoards good 1/2 and nearly abandons good 3).
+
+**H3.** T1 muzero-emp: A1 median 5.05e-11 and B median 0 sit at Nash (paper
+1.50e-12, 0); A2 median **21.2 ≈ paper 21.3** with IQR [~0, 21.2] exposing the
+fundamental/speculative branch lottery (`holdings_A2.png`: muzero-emp on the
+speculative branch); D median **1.71 = paper 1.71**. Attribution note: the A2
+`br_gain=34.16` from Finding #3 is the *Stage-2 A2/dyna-rules* speculative-
+departure realization (surfaced in T4), not the fully-empirical learner — no
+muzero-emp seed exceeds 21.44 across the 10-seed campaign and the Stage-1 single
+run `runs/A2/muzero-emp/0` is 0.0, so the paper's Table-2 21.3 maps to
+muzero-emp's median 21.2 while 34.16 is a distinct learner. C is the one softened
+magnitude — median **3.80 [0.529, 13.3] vs the paper's single-run 12.8**: our
+10 seeds split into a near-Nash cluster (~0.5) and a trapped cluster (7–32), so
+the median lands below the paper's one draw, while the *mechanism* the claim
+names is confirmed — broken fiat links are explicit in `trade_policy_C.png`
+(seed 8). Caveat: classification stationarity is evaluated at the terminal
+empirical μ while br_gain uses μ★ (17-m1), a best-effort reconstruction; four
+C/muzero-emp deployment gains carry `br_gain_recompute` provenance (treated as
+first-class).
+
+**H4.** T1 muzero-known medians are ≈0 in every economy (A1 0, A2 0, B 0, C 0,
+D 4.65e-12) — the claim's substance. Classification NASH is nonetheless 1/10
+(A1 only): on C/D the population one-step residual sits at the finite-N floor
+(~0.01–0.02 > the 1e-3 NASH threshold), so these are gain-level Nash that miss
+the classification gate (T2 muzero-known gain≤0.05: A1 100%, B 100%, C 90%,
+D 90%). This is Finding #9, not a failure to reach Nash (§H4).
+
+**H5/H6.** H6 is clean (T2: `q` NASH 0/10 everywhere; T1 trap gains B 2.89,
+C 0.518, D 5.33 — as trap-prone or worse than empirical). H5 is economy-
+dependent: the 2³ ablation (T4) shows C's rescue is carried by `greedy_backup`
+(planner) alone → gain 0, with `known_rules` alone leaving the 0.518 trap —
+opposite to "mainly model contents"; on D only the `known_rules × greedy_backup`
+interaction closes the gap (3.44e-11). So H5's attribution holds only in part
+(Finding #4; §H5/H6).
+
+**H7, H8, H9 (extensions).** H7 confirmed in direction (T4 E1: D ema0.005 →
+0.270, off the 1.71 plateau; C ema0.005 → 16.4, worse). H8 refuted as stated
+(T4 E2: C per-agent gain 0.008, D 0.224 — orders of magnitude closer to best
+response than the shared-table traps, not "same class slower"); **mandatory
+caveat: E2 artifacts are the MEAN of per-agent π_dep(1) policies, not the policy
+of a mean model — per-agent trap status is untestable post-hoc**. H9 confirmed
+(T4 E3: no (ε, κ0) cell reaches Nash, min median 0.596; ε=0.2 collapses all
+cells onto a single 17.3-gain attractor). Decay addendum (T4): 0/72 NASH, but
+lr-decay produced the first Stage-2 (D1) training-loop convergences ever
+recorded — exactly 7 cells (B/q-eps-lr 3/3, B/q-lr 1/3, C/q-eps-lr 1/3,
+C/q-lr 2/3), read from the trace `converged` flag; the 1/√n schedule is not
+square-summable, so this is noise-taming, not a classical convergence guarantee.
+
+**Fidelity registry pointers.** Slow-mixing hazard is seed-dependent, not
+uniform (C/muzero-emp seed 4 spectral gap ≈4.6e-6; caps raised to 40M, tols
+never loosened). Stale-cap-era values are identified by null br_gain + log
+warnings, not git_sha (17-m5); none survive in the current summaries. Extension
+ablation cells are single-seed (marked in T4); E1/E2 are 5 seeds, E3/decay 3.
