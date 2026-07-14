@@ -86,7 +86,8 @@ def run_dir(replication: Path, stage2: Path, econ: str, learner: str, seed: int)
 
 
 def required_paths(args: argparse.Namespace) -> list[Path]:
-    paths = []
+    paths = [root / "summary.json"
+             for root in (args.replication, args.stage2, args.extensions)]
     for econ in ECONS:
         for _, ref in REF[econ]:
             paths.append(args.reference / econ / ref / "arrays.npz")
@@ -188,7 +189,7 @@ def fig_trade_policy_C(args: argparse.Namespace) -> Path:
         for s in C_TRADE_SEEDS
     }
     cols = [("Nash fiat SNE", nash),
-            (f"muzero-emp seed {C_TRADE_SEEDS[0]} (trap band, near-Nash policy)",
+            (f"muzero-emp seed {C_TRADE_SEEDS[0]}\n(trap band, near-Nash policy)",
              emp[C_TRADE_SEEDS[0]]),
             (f"muzero-emp seed {C_TRADE_SEEDS[1]} (trapped)", emp[C_TRADE_SEEDS[1]])]
     n_types = nash.shape[0]
