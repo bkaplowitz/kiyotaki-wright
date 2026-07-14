@@ -19,7 +19,8 @@ any `runs/*`. Matplotlib Agg backend, one PNG per figure:
                          learners' seed-0 runs -- the learner analogue of the
                          SCE solver's b_t / d_t residual histories.
   trade_policy_C.png     Economy C final trade policy alpha as heatmaps: the
-                         Nash fiat SNE vs muzero-emp seed 0 (near-Nash) and
+                         Nash fiat SNE vs muzero-emp seed 0 (trap band,
+                         br_gain 0.59, policy structurally near Nash) and
                          seed 8 (trapped) -- the broken-fiat-links visual.
   outcome_frequency.png  campaign NASH and gain-level (br_gain<=0.05)
                          frequencies with Wilson 95% error bars.
@@ -30,8 +31,9 @@ plotting.
 
 Seed choices are fixed and disclosed in the figure captions/titles: learner
 mu_star and learning paths use seed 0; the C trade-policy figure contrasts the
-near-Nash seed-0 attractor with the trapped seed-8 attractor (the two poles of
-the seed-dependent stopping-time lottery documented in findings.md).
+trap-band seed-0 attractor (br_gain 0.59, policy structurally near Nash) with
+the trapped seed-8 attractor (the two poles of the seed-dependent
+stopping-time lottery documented in findings.md).
 """
 
 import argparse
@@ -72,7 +74,7 @@ REF_COLORS = {
     "Nash": "black", "Nash-fund": "black", "Nash-spec": "dimgray",
     "SCE-autarky": "silver", "SCE-lowtrade": "silver", "SCE-t1autarky": "silver",
 }
-C_TRADE_SEEDS = (0, 8)  # near-Nash vs trapped attractor (seed-dependent lottery)
+C_TRADE_SEEDS = (0, 8)  # trap band (near-Nash policy) vs trapped attractor (seed lottery)
 
 
 def campaign_root(replication: Path, stage2: Path, learner: str) -> Path:
@@ -186,7 +188,8 @@ def fig_trade_policy_C(args: argparse.Namespace) -> Path:
         for s in C_TRADE_SEEDS
     }
     cols = [("Nash fiat SNE", nash),
-            (f"muzero-emp seed {C_TRADE_SEEDS[0]} (near-Nash)", emp[C_TRADE_SEEDS[0]]),
+            (f"muzero-emp seed {C_TRADE_SEEDS[0]} (trap band, near-Nash policy)",
+             emp[C_TRADE_SEEDS[0]]),
             (f"muzero-emp seed {C_TRADE_SEEDS[1]} (trapped)", emp[C_TRADE_SEEDS[1]])]
     n_types = nash.shape[0]
     fig, axes = plt.subplots(n_types, len(cols), figsize=(3.2 * len(cols), 3.0 * n_types))

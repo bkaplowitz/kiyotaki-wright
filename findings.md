@@ -1233,10 +1233,11 @@ campaign summaries by `scripts/make_tables.py` (→ `reports/tables.md`, tables
 T1–T4) and `scripts/make_figures.py` (→ `reports/figures/*.png`). Both scripts
 fail loud (nonzero exit, naming every absent record) against the expected
 100 + 150 + 169 run set before emitting anything; the summaries carry no null
-br_gain/stationarity, so tables use plain (nan-safe) medians and figures carry
-nan-aware series only for the decay learning paths. Seed choices are fixed and
+br_gain/stationarity, so tables use plain (nan-safe) medians, and the 25
+seed-0 series the figures plot contain no nulls. Seed choices are fixed and
 disclosed in-figure: μ★ and learning paths at seed 0; the C trade-policy
-heatmap contrasts seed 0 (near-Nash) with seed 8 (trapped).
+heatmap contrasts seed 0 (trap band, br_gain 0.594, policy structurally near
+Nash) with seed 8 (trapped, 13.98).
 
 **Headline.** `3/100` replication runs classify NASH vs `0/150` Stage-2 and
 `0/169` extensions (T2 totals; `outcome_frequency.png`) — the only NASH-class
@@ -1267,14 +1268,16 @@ attractors (e.g. C's SCE-low-trade hoards good 1/2 and nearly abandons good 3).
 1.50e-12, 0); A2 median **21.2 ≈ paper 21.3** with IQR [~0, 21.2] exposing the
 fundamental/speculative branch lottery (`holdings_A2.png`: muzero-emp on the
 speculative branch); D median **1.71 = paper 1.71**. Attribution note: the A2
-`br_gain=34.16` from Finding #3 is the *Stage-2 A2/dyna-rules* speculative-
-departure realization (surfaced in T4), not the fully-empirical learner — no
-muzero-emp seed exceeds 21.44 across the 10-seed campaign and the Stage-1 single
-run `runs/A2/muzero-emp/0` is 0.0, so the paper's Table-2 21.3 maps to
-muzero-emp's median 21.2 while 34.16 is a distinct learner. C is the one softened
+`br_gain=34.16` from Finding #3 is the *Stage-2 dyna* speculative-departure
+realization (dyna-emp seeds 2,5; dyna-rules seeds 0,6,8; surfaced in T4), not
+the fully-empirical learner — no muzero-emp seed exceeds 21.44 across the
+10-seed campaign and the Stage-1 single run `runs/A2/muzero-emp/0` is ≈6.2e-12
+(machine zero), so the paper's Table-2 21.3 maps to muzero-emp's median 21.2
+while 34.16 belongs to a different learner family. C is the one softened
 magnitude — median **3.80 [0.529, 13.3] vs the paper's single-run 12.8**: our
-10 seeds split into a near-Nash cluster (~0.5) and a trapped cluster (7–32), so
-the median lands below the paper's one draw, while the *mechanism* the claim
+10 seeds split into a low-gain trap band (four seeds ≈0.5, plus one genuinely
+near-Nash draw: seed 5 at 0.0047) and a trapped cluster (7–32), so the median
+lands below the paper's one draw, while the *mechanism* the claim
 names is confirmed — broken fiat links are explicit in `trade_policy_C.png`
 (seed 8). Caveat: classification stationarity is evaluated at the terminal
 empirical μ while br_gain uses μ★ (17-m1), a best-effort reconstruction; four
