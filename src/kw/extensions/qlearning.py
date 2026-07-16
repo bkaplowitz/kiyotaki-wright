@@ -1,0 +1,358 @@
+"""Differential (average-reward) tabular Q-learning baseline (extensions/architecture.md §4).
+
+`QLearner` implements the same `Learner` protocol (§7.5) as `MuZeroLearner`, so
+`simulate.run_learning` drives it identically, but it replaces the PUCT
+self-play/DP-planner machinery with a plain tabular Q-learning update over the
+two-stage (trade, then consumption) period structure. There is no empirical
+model, no planner, no policy/value mixing: greedy behavior is read directly
+off the Q-tables and both tables are updated on-line, one meeting at a time.
+
+Two population-shared tables (per-agent banks are out of scope here, see
+below): `QT[i,k,j,lam]` for the trade-stage root (type i, currently holding
+k, meets a partner offering j, considers action lam in {0,1}), and
+`QC[i,h,gamma]` for the consumption-stage root (type i, now holding h after
+trade, considers action gamma in {0,1}). `gbar[i]` is the running average-
+reward estimate used to center the consumption-stage TD target (Wan-Naik-
+Sutton 2021 differential Q-learning, adapted to this two-stage period).
+Infeasible cells (`~econ.lambda_feasible`, and `~econ.gamma_feasible` on the
+gamma=1 column only -- gamma=0/hold is always feasible) are pinned at -inf
+so they never win an argmax and are excluded from the greedy/deployment
+policy and from the `end_iteration` delta.
+
+Update equations (ext §4), applied per observed transition:
+  trade stage        delta_T = max_gamma QC[i,h+,gamma] - QT[i,k,j,lam]   (r_T = 0)
+                      QT += q_lr * delta_T
+  consumption stage   delta_C = r_C - gbar[i] + max_lam' QT[i,h++,j',lam'] - QC[i,h,gamma]
+                      QC += q_lr * delta_C ;  gbar[i] += eta * q_lr * delta_C
+
+The consumption-stage TD cannot complete when `observe_cons` fires: the
+bootstrap term `max_lam' QT[i,h++,j',lam']` needs the *next* meeting's
+offered good j', which the (agent, i, h, gamma, h_next, r) record does not
+carry. `observe_cons` therefore only stashes a pending per-agent record;
+`observe_meeting_agent(agent, i, k, j_good)` -- an optional hook on the
+`Learner` protocol (§7.5) that `simulate.py`'s `_run_trade_round` calls,
+guarded by `hasattr`, for both agents of every meeting, before either agent's
+`trade_action` -- looks up and completes any pending record for that agent,
+using the just-revealed (k, j_good) as (i, h++, j'). `MuZeroLearner` does not
+implement this hook (its meeting counts already come through
+`observe_meeting`), so the guard leaves it untouched.
+
+When the revealed meeting is same-good (k == j_good), (i, h++, j') is not a
+trade root at all -- `lambda_feasible` requires k != j, so `QT[i,h++,j',:]`
+is exactly the -inf infeasibility mask, not a merely-unvisited zero, and
+`max` over it must not be used as a bootstrap target (it would poison QC/
+gbar with -inf, later surfacing as nan on an inf - inf cancellation). A
+same-good meeting has no trade decision to make (adjudication 3, mirrored
+from `MuZeroLearner`): the agent proceeds directly to the consumption stage
+still holding h++, so the bootstrap falls back to `max_gamma QC[i,h++,gamma]`
+-- the same reduction the trade-stage TD already performs for its own
+bootstrap, one level down.
+
+`per_agent=True` is accepted but raises `NotImplementedError`, matching
+`MuZeroLearner`: routing per-agent banks needs an agent id that the
+`trade_action`/`cons_action` protocol does not carry (deferred, per the
+architecture's per-agent extension).
+
+`dyna="emp"|"rules"` (ext §4) layers Dyna-Q planning on top of the real-
+experience TD updates above, unchanged: the learner additionally owns a
+population-shared `ModelBank` (`n_banks=1`, mirroring `MuZeroLearner`), fed
+through the identical observation pathway (`observe_meeting`,
+`observe_trade`, `observe_cons`); `dyna="rules"` additionally feeds
+`observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))` for every true
+offer (`rec.k != rec.j`) -- the same opposite-direction acceptance evidence
+`MuZeroLearner`'s `known_rules` branch feeds; `dyna="emp"` never does
+(fidelity 12.10). After every real TD completes (a feasible trade update in
+`observe_trade`, or a completed pending consumption update in
+`observe_meeting_agent`), `dyna_k` expected planning backups run against a
+uniformly sampled visited nontrivial root (trade roots `k != j`; cons roots
+`(i, h)`; same-good trade roots are never visited, hence never sampled),
+drawn from `self.rng`. Each backup replaces the bootstrap term of the
+corresponding real-experience update with its full expectation under the
+current model (`EmpiricalBackend`/`RulesBackend`, `kw.planner`) in place of
+one observed transition, at step size `q_lr`, and writes only the Q table
+-- `gbar` moves on real consumption TDs alone, `eta` plays no role in
+planning. Backend kernels are memoized per type between model observations
+(`_kernels`) -- pure value-preserving caching of the count renormalization,
+invalidated on every model feed, so backups always see the current model. The cons-root backup mirrors `observe_meeting_agent`'s same-good
+fallback one level up: the simulated next meeting's offered good `j` is
+drawn from `m_hat_i`, and whenever `j` equals the simulated post-
+consumption holding `h''`, the backup substitutes `max_gamma QC[i, h'', :]`
+for `max_lambda QT[i, h'', j, :]`, since that diagonal is the permanent
+`-inf` infeasibility mask, not an unvisited zero.
+
+RNG discipline (§12.2): action sampling draws from the per-call `rng`
+argument threaded by `simulate.run_learning`. The constructor `rng` is
+stored but reserved for action sampling, matching `MuZeroLearner` -- Dyna's
+planning-root sampling is the one place this learner draws from it directly.
+
+Decay arms (Task 18, both off by default and then byte-identical to the
+constant-parameter baseline above):
+  - `eps_start` anneals the behavior epsilon on the paper's zeta schedule
+    shape, eps_n = max(cfg.eps_floor, eps_start * cfg.zeta_decay**(n-1)),
+    advanced once per `end_iteration`; `eps_start=None` keeps today's
+    constant eps = cfg.eps_floor.
+  - `q_lr_visit=True` replaces the constant real-experience TD step with the
+    Robbins-Monro-style per-visit step q_lr / sqrt(n_visits(cell)), counted
+    per updated Q cell (per-visit rather than a global 1/sqrt(t) clock: the
+    stuck cells' problem is sparse visitation of the rescue links, and a
+    global clock would shrink a rarely-visited cell's step before it has
+    received samples). The consumption TD's paired `gbar` move shares the
+    same decayed step, mirroring the constant rule gbar += eta * a * delta_C.
+    Dyna planning backups keep the constant `q_lr`: they are deterministic
+    expected backups under the current model, not stochastic-approximation
+    steps, so the per-visit schedule (which exists to tame sampling noise)
+    does not apply, and the proven planning code stays untouched.
+"""
+
+import numpy as np
+
+from kw.economies import Economy
+from kw.empirical_model import ModelBank
+from kw.learners.base import ConsRecord, LearnerConfig, TradeRecord
+from kw.planner import EmpiricalBackend, RulesBackend
+
+
+class QLearner:
+    """Differential average-reward tabular Q-learning (Learner protocol, §7.5)."""
+
+    def __init__(
+        self,
+        econ: Economy,
+        cfg: LearnerConfig,
+        rng: np.random.Generator,
+        dyna: str = "none",
+        q_lr: float = 0.1,
+        eta: float = 0.5,
+        dyna_k: int = 20,
+        per_agent: bool = False,
+        eps_start: float | None = None,
+        q_lr_visit: bool = False,
+    ) -> None:
+        if per_agent:
+            raise NotImplementedError(
+                "per_agent Q/model banks are out of scope for the Q-learning baseline; "
+                "extension E2 runs muzero-emp only (extensions/architecture.md section 6)"
+            )
+        if dyna not in ("none", "emp", "rules"):
+            raise ValueError(f"dyna={dyna!r} must be one of 'none', 'emp', 'rules'")
+        if eps_start is not None and not (cfg.eps_floor <= eps_start <= 1.0):
+            raise ValueError(
+                f"eps_start={eps_start} must lie in [cfg.eps_floor={cfg.eps_floor}, 1]"
+            )
+        self.econ = econ
+        self.cfg = cfg
+        self.rng = rng
+        self.dyna = dyna
+        self.q_lr = q_lr
+        self.eta = eta
+        self.dyna_k = dyna_k
+        self.per_agent = per_agent
+        self.eps_start = eps_start
+        self.q_lr_visit = q_lr_visit
+        self.eps = cfg.eps_floor if eps_start is None else eps_start
+
+        n_types, n_goods = econ.n_types, econ.n_goods
+        self.QT = np.zeros((n_types, n_goods, n_goods, 2), dtype=np.float64)
+        self.QT[~econ.lambda_feasible] = -np.inf
+        self.QC = np.zeros((n_types, n_goods, 2), dtype=np.float64)
+        self.QC[..., 1] = np.where(econ.gamma_feasible, 0.0, -np.inf)
+        self.gbar = np.zeros(n_types, dtype=np.float64)
+        self._qt_visits = np.zeros_like(self.QT) if q_lr_visit else None
+        self._qc_visits = np.zeros_like(self.QC) if q_lr_visit else None
+
+        self.bank = None
+        self.model = None
+        self.backend = None
+        if dyna != "none":
+            self.bank = ModelBank(econ, n_banks=1, kappa0=cfg.kappa0)
+            self.model = self.bank[0]
+            self.backend = (
+                RulesBackend(econ, self.model) if dyna == "rules" else EmpiricalBackend(self.model)
+            )
+
+        self._pending: dict[int, ConsRecord] = {}
+        self._trade_visited: set[tuple[int, int, int]] = set()
+        self._cons_visited: set[tuple[int, int]] = set()
+        self._dyna_trade_roots: list[tuple[int, int, int]] = []
+        self._dyna_cons_roots: list[tuple[int, int]] = []
+        self._dyna_trade_seen: set[tuple[int, int, int]] = set()
+        self._dyna_cons_seen: set[tuple[int, int]] = set()
+        self._kernel_cache: dict[
+            int, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ] = {}
+        self._alpha_prev, self._beta_prev = self._greedy_alpha_beta()
+
+    def observe_meeting(self, i: int, j_good: int, agent: int = 0) -> None:
+        """Feeds `m_hat` for `dyna != "none"`; otherwise a no-op, since this
+        learner's pending-transition bookkeeping is driven by
+        `observe_meeting_agent` instead (see the module docstring). The
+        protocol's `agent` id is accepted and ignored (shared tables)."""
+        if self.dyna != "none":
+            self.model.observe_meeting(i, j_good)
+            self._kernel_cache.clear()
+
+    def trade_action(
+        self, i: int, k: int, j: int, rng: np.random.Generator, agent: int = 0
+    ) -> int:
+        if k == j:
+            return 0
+        self._trade_visited.add((i, k, j))
+        if self.dyna != "none" and (i, k, j) not in self._dyna_trade_seen:
+            self._dyna_trade_seen.add((i, k, j))
+            self._dyna_trade_roots.append((i, k, j))
+        if rng.random() < self.eps:
+            return int(rng.integers(0, 2))
+        return int(self.QT[i, k, j, 1] > self.QT[i, k, j, 0])
+
+    def cons_action(self, i: int, h: int, rng: np.random.Generator, agent: int = 0) -> int:
+        self._cons_visited.add((i, h))
+        if self.dyna != "none" and (i, h) not in self._dyna_cons_seen:
+            self._dyna_cons_seen.add((i, h))
+            self._dyna_cons_roots.append((i, h))
+        feasible1 = bool(self.econ.gamma_feasible[i, h])
+        if rng.random() < self.eps:
+            return int(rng.integers(0, 2)) if feasible1 else 0
+        return int(feasible1 and self.QC[i, h, 1] > self.QC[i, h, 0])
+
+    def observe_trade(self, rec: TradeRecord) -> None:
+        if self.dyna != "none":
+            self.model.observe_trade(rec)
+            if self.dyna == "rules" and rec.k != rec.j:
+                self.model.observe_offer(k=rec.j, j=rec.k, accepted=bool(rec.lam))
+            self._kernel_cache.clear()
+        if not self.econ.lambda_feasible[rec.i, rec.k, rec.j]:
+            return
+        step = self.q_lr
+        if self.q_lr_visit:
+            self._qt_visits[rec.i, rec.k, rec.j, rec.lam] += 1.0
+            step = self.q_lr / np.sqrt(self._qt_visits[rec.i, rec.k, rec.j, rec.lam])
+        target = float(np.max(self.QC[rec.i, rec.h_next, :]))
+        delta_t = target - self.QT[rec.i, rec.k, rec.j, rec.lam]
+        self.QT[rec.i, rec.k, rec.j, rec.lam] += step * delta_t
+        if self.dyna != "none":
+            self._plan()
+
+    def observe_cons(self, rec: ConsRecord) -> None:
+        if self.dyna != "none":
+            self.model.observe_cons(rec)
+            self._kernel_cache.clear()
+        self._pending[rec.agent] = rec
+
+    def observe_meeting_agent(self, agent: int, i: int, k: int, j_good: int) -> None:
+        rec = self._pending.pop(agent, None)
+        if rec is None:
+            return
+        if k == j_good:
+            target = float(np.max(self.QC[i, k, :]))
+        else:
+            target = float(np.max(self.QT[i, k, j_good, :]))
+        step = self.q_lr
+        if self.q_lr_visit:
+            self._qc_visits[rec.i, rec.h, rec.gamma] += 1.0
+            step = self.q_lr / np.sqrt(self._qc_visits[rec.i, rec.h, rec.gamma])
+        delta_c = rec.r - self.gbar[rec.i] + target - self.QC[rec.i, rec.h, rec.gamma]
+        self.QC[rec.i, rec.h, rec.gamma] += step * delta_c
+        self.gbar[rec.i] += self.eta * step * delta_c
+        if self.dyna != "none":
+            self._plan()
+
+    def _plan(self) -> None:
+        """`dyna_k` expected planning backups (ext §4) at roots uniformly
+        sampled, with replacement, from every nontrivial root visited so far
+        by real experience (`_dyna_trade_roots`/`_dyna_cons_roots`, populated
+        in `trade_action`/`cons_action`, never cleared). No-op until at least
+        one such root has been visited."""
+        n_t = len(self._dyna_trade_roots)
+        n_c = len(self._dyna_cons_roots)
+        total = n_t + n_c
+        if total == 0:
+            return
+        for _ in range(self.dyna_k):
+            idx = int(self.rng.integers(0, total))
+            if idx < n_t:
+                self._backup_trade_root(*self._dyna_trade_roots[idx])
+            else:
+                self._backup_cons_root(*self._dyna_cons_roots[idx - n_t])
+
+    def _kernels(self, i: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Snapshot of the backend's per-type kernels `(m, p_trade, p_cons,
+        r_trade, r_cons)`, memoized between model observations: every model
+        feed (`observe_meeting`/`observe_trade`/`observe_cons`, including
+        `observe_offer` inside `observe_trade`) clears the cache, so the
+        `dyna_k` backups of one `_plan` burst renormalize the count tables
+        once per sampled type instead of once per backup. Value-preserving:
+        the backends return freshly built arrays or immutable precomputed
+        constants, never live views of the mutable counts, so a cache hit
+        replays byte-identical kernels."""
+        cached = self._kernel_cache.get(i)
+        if cached is None:
+            be = self.backend
+            cached = (be.m(i), be.p_trade(i), be.p_cons(i), be.r_trade(i), be.r_cons(i))
+            self._kernel_cache[i] = cached
+        return cached
+
+    def _backup_trade_root(self, i: int, k: int, j: int) -> None:
+        _, p_trade_i, _, r_trade_i, _ = self._kernels(i)
+        r_t = r_trade_i[k, j, :]
+        p_t = p_trade_i[k, j, :, :]
+        qc_max = np.max(self.QC[i], axis=-1)
+        target = r_t + p_t @ qc_max
+        self.QT[i, k, j, :] = (1.0 - self.q_lr) * self.QT[i, k, j, :] + self.q_lr * target
+
+    def _backup_cons_root(self, i: int, h: int) -> None:
+        """The expected-form mirror of `observe_meeting_agent`'s same-good
+        fallback: the simulated next meeting offers good `j` ~ `m_hat_i`, and
+        whenever `j == h''` (the simulated post-consumption holding), the
+        backup substitutes `max_gamma QC[i, h'', :]` for the permanently
+        `-inf` `max_lambda QT[i, h'', j, :]` diagonal."""
+        m_i, _, p_cons_i, _, r_cons_i = self._kernels(i)
+        qt_max = np.max(self.QT[i], axis=-1)
+        qc_max = np.max(self.QC[i], axis=-1)
+        val = qt_max.copy()
+        np.fill_diagonal(val, qc_max)
+        eff = val @ m_i
+        r_c = r_cons_i[h, :]
+        p_c = p_cons_i[h, :, :]
+        target = r_c - self.gbar[i] + p_c @ eff
+        new_row = (1.0 - self.q_lr) * self.QC[i, h, :] + self.q_lr * target
+        self.QC[i, h, 0] = new_row[0]
+        if self.econ.gamma_feasible[i, h]:
+            self.QC[i, h, 1] = new_row[1]
+
+    def _greedy_alpha_beta(self) -> tuple[np.ndarray, np.ndarray]:
+        econ = self.econ
+        alpha = np.where(econ.lambda_feasible & (self.QT[..., 1] > self.QT[..., 0]), 1.0, 0.0)
+        beta = np.where(econ.gamma_feasible & (self.QC[..., 1] > self.QC[..., 0]), 1.0, 0.0)
+        return alpha, beta
+
+    @property
+    def alpha(self) -> np.ndarray:
+        return self._greedy_alpha_beta()[0]
+
+    @property
+    def beta(self) -> np.ndarray:
+        return self._greedy_alpha_beta()[1]
+
+    def end_iteration(self, n: int) -> float:
+        econ = self.econ
+        alpha_new, beta_new = self._greedy_alpha_beta()
+
+        trade_feasible = [(i, k, j) for (i, k, j) in self._trade_visited if econ.lambda_feasible[i, k, j]]
+        sum_t = sum(abs(alpha_new[i, k, j] - self._alpha_prev[i, k, j]) for (i, k, j) in trade_feasible)
+        n_t = len(trade_feasible)
+
+        cons_feasible = [(i, h) for (i, h) in self._cons_visited if econ.gamma_feasible[i, h]]
+        sum_c = sum(abs(beta_new[i, h] - self._beta_prev[i, h]) for (i, h) in cons_feasible)
+        n_c = len(cons_feasible)
+
+        delta = (sum_t + sum_c) / max(1, n_t + n_c)
+
+        if self.eps_start is not None:
+            self.eps = max(self.cfg.eps_floor, self.eps_start * self.cfg.zeta_decay**n)
+
+        self._alpha_prev, self._beta_prev = alpha_new, beta_new
+        self._trade_visited, self._cons_visited = set(), set()
+        return float(delta)
+
+    def deployment_policy(self) -> tuple[np.ndarray, np.ndarray]:
+        return self._greedy_alpha_beta()
