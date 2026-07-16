@@ -1,7 +1,7 @@
 [project]
 name = "kw"
 version = "0.1.0"
-description = "Add your description here"
+description = "Kiyotaki-Wright exchange economies: Nash/SCE solvers, PUCT self-play learner, and RL baselines (Sargent & Yang 2026 replication)"
 readme = "README.md"
 authors = [
     { name = "Brandon Kaplowitz", email = "bkaplowitzbk@gmail.com" }

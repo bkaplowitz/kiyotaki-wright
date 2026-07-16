@@ -1020,3 +1020,15 @@ Stage-2 grid (H5/H6, ext §6).
 - **Separation check:** Part A tasks touch nothing under `src/kw/extensions/`; extension hooks introduced in Part A (`ema_gain`, `ModelBank`, flag triple) default to paper behavior and are exercised off-default only in Part B; the import-direction lint lands with the first extension code (Task 15).
 - **Placeholder scan:** the single deliberate deferred item — exact per-economy SCE prompt text — is an explicit re-read-the-paper instruction inside Task 7 Step 1 with the source path named, not a TBD.
 - **Type consistency:** `mu (I,G)`, `alpha (I,G,G)`, `beta (I,G)`, `Q/q̂ (G,G)`, `v (I,G)`, `QT (I,G,G,2)`, `QC (I,G,2)` used uniformly; `Learner` protocol methods match between Tasks 8 (base), 10 (harness), 12 (MuZero), 15 (Q) — including the optional `observe_meeting_agent` hook introduced in Task 15 and tolerated by the harness.
+
+## Post-plan note for any Stage-3+ planning (added after execution)
+
+The one genuine gap this plan left unaddressed, discovered during execution: **learned
+near-deterministic deployed policies produce slow-mixing Markov chains** (spectral gaps
+1e-6 to 7e-7 per iteration), so invariant-distribution and RVI solves converge at that
+geometric rate. Three iteration caps had to be raised mid-execution (200k → 10M → 40M,
+commits d740fb8 / aeee24e / bf1688a) with measured convergence at ~11.1M and ~12.6M
+iterations; tolerances (1e-12 distribution, 1e-10 Bellman) were treated as contracts and
+never loosened. Any follow-on plan whose learners can approach deterministic policies
+should budget solver caps for this regime up front — the hazard is seed- and
+realization-dependent, not uniform across cells.
