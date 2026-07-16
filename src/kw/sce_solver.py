@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from kw.bellman import greedy_policy, policy_eval_subjective, rvi_solve_subjective
-from kw.distributions import aggregate, invariant, one_step, reciprocation
+from kw.distributions import aggregate, default_mu0, invariant, one_step, reciprocation
 from kw.economies import Economy
 
 
@@ -51,17 +51,6 @@ class SCEResult:
     b_history: list[float]
     d_history: list[float]
     converged: bool
-
-
-def _default_mu0(econ: Economy) -> np.ndarray:
-    """Everyone holds f[i]; economy C splits fiat share M0 on idx 0, remainder on f[i]."""
-    mu0 = np.zeros((econ.n_types, econ.n_goods), dtype=np.float64)
-    if econ.fiat_idx is not None:
-        mu0[:, econ.fiat_idx] = econ.M0
-        mu0[np.arange(econ.n_types), econ.f] = 1.0 - econ.M0
-    else:
-        mu0[np.arange(econ.n_types), econ.f] = 1.0
-    return mu0
 
 
 _MU_TOL = 1e-15
@@ -98,15 +87,13 @@ def solve_sce(
 ) -> SCEResult:
     alpha, beta = alpha0.copy(), beta0.copy()
     m, q = m0.copy(), q0.copy()
-    mu = _default_mu0(econ)
     s_hist: list[float] = []
     b_hist: list[float] = []
     d_hist: list[float] = []
+    mu = invariant(econ, default_mu0(econ), alpha, beta, tol=_MU_TOL)
+    agg = aggregate(econ, mu)
+    Q = reciprocation(econ, mu, alpha)
     for _ in range(max_iter):
-        mu = invariant(econ, mu, alpha, beta, tol=_MU_TOL)
-        agg = aggregate(econ, mu)
-        Q = reciprocation(econ, mu, alpha)
-
         alpha_br, beta_br = np.zeros_like(alpha), np.zeros_like(beta)
         s = 0.0
         for i in range(econ.n_types):

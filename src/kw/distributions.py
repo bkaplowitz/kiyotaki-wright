@@ -10,6 +10,17 @@ import numpy as np
 from kw.economies import Economy
 
 
+def default_mu0(econ: Economy) -> np.ndarray:
+    """Everyone holds f[i]; economy C splits fiat share M0 on idx 0, remainder on f[i]."""
+    mu0 = np.zeros((econ.n_types, econ.n_goods), dtype=np.float64)
+    if econ.fiat_idx is not None:
+        mu0[:, econ.fiat_idx] = econ.M0
+        mu0[np.arange(econ.n_types), econ.f] = 1.0 - econ.M0
+    else:
+        mu0[np.arange(econ.n_types), econ.f] = 1.0
+    return mu0
+
+
 def aggregate(econ: Economy, mu: np.ndarray) -> np.ndarray:
     """mu(k) = sum_i nu_i mu_i(k), the good-k population marginal (B1)."""
     return (econ.nu[:, None] * mu).sum(axis=0)

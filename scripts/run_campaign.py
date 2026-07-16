@@ -109,18 +109,18 @@ def _run_one(out: Path, econ: str, learner: str, seed: int, forwarded: list[str]
     print(f"[done ] {econ}/{learner}/{seed} rc={rc} elapsed={elapsed:.1f}s", flush=True)
 
 
-def _none_if_nan(x) -> float | None:
+def none_if_nan(x) -> float | None:
     if x is None:
         return None
     x = float(x)
     return None if math.isnan(x) else x
 
 
-def _classification(trace: dict) -> str | None:
+def classify(trace: dict) -> str | None:
     if trace.get("classification") is not None:
         return trace["classification"]
-    b = _none_if_nan(trace.get("br_gain_deployment"))
-    d = _none_if_nan(trace.get("stationarity_deployment"))
+    b = none_if_nan(trace.get("br_gain_deployment"))
+    d = none_if_nan(trace.get("stationarity_deployment"))
     if b is None or d is None:
         return None
     thr = Thresholds()
@@ -136,11 +136,11 @@ def _summarize(out: Path, cells: list[tuple[str, str, int]]) -> list[dict]:
                 "economy": econ,
                 "learner": learner,
                 "seed": seed,
-                "br_gain": _none_if_nan(trace["br_gain_deployment"]),
-                "stationarity": _none_if_nan(trace["stationarity_deployment"]),
-                "classification": _classification(trace),
+                "br_gain": none_if_nan(trace["br_gain_deployment"]),
+                "stationarity": none_if_nan(trace["stationarity_deployment"]),
+                "classification": classify(trace),
                 "n_iters": trace["n_iters"],
-                "wall_clock": _none_if_nan(trace.get("elapsed_seconds")),
+                "wall_clock": none_if_nan(trace.get("elapsed_seconds")),
             }
         )
     return records

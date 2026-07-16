@@ -33,19 +33,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from kw.bellman import policy_eval, policy_eval_subjective, rvi_solve, rvi_solve_subjective
-from kw.distributions import aggregate, invariant, one_step, reciprocation
+from kw.distributions import aggregate, default_mu0, invariant, one_step, reciprocation
 from kw.economies import Economy
-
-
-def _default_mu0(econ: Economy) -> np.ndarray:
-    """Everyone holds f[i]; economy C splits fiat share M0 on idx 0, remainder on f[i]."""
-    mu0 = np.zeros((econ.n_types, econ.n_goods), dtype=np.float64)
-    if econ.fiat_idx is not None:
-        mu0[:, econ.fiat_idx] = econ.M0
-        mu0[np.arange(econ.n_types), econ.f] = 1.0 - econ.M0
-    else:
-        mu0[np.arange(econ.n_types), econ.f] = 1.0
-    return mu0
 
 
 def br_gain(
@@ -64,7 +53,7 @@ def br_gain(
     a complete-information best response at mu, i.e. Nash.
     """
     if mu is None:
-        mu = invariant(econ, _default_mu0(econ), alpha, beta)
+        mu = invariant(econ, default_mu0(econ), alpha, beta)
     agg = aggregate(econ, mu)
     Q = reciprocation(econ, mu, alpha)
     gaps = np.zeros(econ.n_types, dtype=np.float64)
@@ -125,7 +114,7 @@ def sce_certificate(
     start, mirroring `br_gain`'s default.
     """
     if mu is None:
-        mu = invariant(econ, _default_mu0(econ), alpha, beta)
+        mu = invariant(econ, default_mu0(econ), alpha, beta)
     if q_hat.ndim == 2:
         q_hat = np.broadcast_to(q_hat, (econ.n_types, econ.n_goods, econ.n_goods))
 
