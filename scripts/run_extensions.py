@@ -47,8 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_campaign import (  # noqa: E402
     OK_RETURNCODES,
     RUN_LEARNING,
-    _classification,
-    _none_if_nan,
+    classify,
+    none_if_nan,
 )
 
 EMA_GAINS = ("0.005", "0.02", "0.05")
@@ -153,11 +153,11 @@ def _summarize(out: Path, cells: list[Cell]) -> list[dict]:
                 "learner": cell.learner,
                 "cell": cell.label,
                 "seed": cell.seed,
-                "br_gain": _none_if_nan(trace["br_gain_deployment"]),
-                "stationarity": _none_if_nan(trace["stationarity_deployment"]),
-                "classification": _classification(trace),
+                "br_gain": none_if_nan(trace["br_gain_deployment"]),
+                "stationarity": none_if_nan(trace["stationarity_deployment"]),
+                "classification": classify(trace),
                 "n_iters": trace["n_iters"],
-                "wall_clock": _none_if_nan(trace.get("elapsed_seconds")),
+                "wall_clock": none_if_nan(trace.get("elapsed_seconds")),
             }
         )
     return records
