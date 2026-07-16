@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from kw.bellman import greedy_policy, policy_eval, rvi_solve
-from kw.distributions import aggregate, invariant, one_step, reciprocation
+from kw.distributions import aggregate, default_mu0, invariant, one_step, reciprocation
 from kw.economies import Economy
 
 
@@ -30,17 +30,6 @@ class NashResult:
     gain_gap_history: list[float]
     dist_history: list[float]
     converged: bool
-
-
-def _default_mu0(econ: Economy) -> np.ndarray:
-    """Everyone holds f[i]; economy C splits fiat share M0 on idx 0, remainder on f[i]."""
-    mu0 = np.zeros((econ.n_types, econ.n_goods), dtype=np.float64)
-    if econ.fiat_idx is not None:
-        mu0[:, econ.fiat_idx] = econ.M0
-        mu0[np.arange(econ.n_types), econ.f] = 1.0 - econ.M0
-    else:
-        mu0[np.arange(econ.n_types), econ.f] = 1.0
-    return mu0
 
 
 def _gains(econ: Economy, alpha: np.ndarray, beta: np.ndarray, mu: np.ndarray) -> np.ndarray:
@@ -63,7 +52,7 @@ def solve_nash(
     max_iter: int = 2000,
 ) -> NashResult:
     alpha, beta = alpha0.copy(), beta0.copy()
-    mu = _default_mu0(econ) if mu0 is None else mu0.copy()
+    mu = default_mu0(econ) if mu0 is None else mu0.copy()
     gaps: list[float] = []
     dists: list[float] = []
     for _ in range(max_iter):
